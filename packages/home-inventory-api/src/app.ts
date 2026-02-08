@@ -1,10 +1,14 @@
 import express from "express";
 import type { Express } from "express";
 import {
+  ClaimJobResponseSchema,
   CompleteJobRequestSchema,
   EnqueueJobResponseSchema,
   FailJobRequestSchema,
   HealthResponseSchema,
+  JobResultRequestSchema,
+  JobResultResponseSchema,
+  ReceiptDetailsResponseSchema,
   ReceiptProcessRequestSchema,
   ReceiptUploadRequestSchema,
   type HealthResponse,
@@ -41,6 +45,21 @@ export function createApp(params: CreateAppParams): Express {
     res.status(201).json(response);
   });
 
+  app.get("/v1/receipts/:receiptUploadId", (req, res) => {
+    const receiptUploadId = parseParam(req.params.receiptUploadId, "receiptUploadId", res);
+    if (!receiptUploadId) {
+      return;
+    }
+
+    const receipt = params.store.getReceipt(receiptUploadId);
+    if (!receipt) {
+      res.status(404).json({ error: "not_found", message: `receipt not found: ${receiptUploadId}` });
+      return;
+    }
+
+    res.json(ReceiptDetailsResponseSchema.parse(receipt));
+  });
+
   app.post("/v1/receipts/:receiptUploadId/process", (req, res) => {
     const receiptUploadId = parseParam(req.params.receiptUploadId, "receiptUploadId", res);
     if (!receiptUploadId) {
@@ -56,6 +75,7 @@ export function createApp(params: CreateAppParams): Express {
       const job = params.store.enqueueJob({
         householdId: body.householdId,
         receiptUploadId,
+        request: body,
       });
       res.status(202).json(EnqueueJobResponseSchema.parse({ job }));
     } catch (error) {
@@ -76,13 +96,46 @@ export function createApp(params: CreateAppParams): Express {
     res.json({ job });
   });
 
+  app.get("/v1/inventory/:householdId", (req, res) => {
+    const householdId = parseParam(req.params.householdId, "householdId", res);
+    if (!householdId) {
+      return;
+    }
+
+    const snapshot = params.store.getInventory(householdId);
+    res.json(snapshot);
+  });
+
   app.post("/internal/jobs/claim", (req, res) => {
     if (!requireWorkerToken(req, res, params.config.workerToken)) {
       return;
     }
 
-    const job = params.store.claimNextJob();
-    res.json({ job });
+    const claimed = params.store.claimNextJob();
+    res.json(ClaimJobResponseSchema.parse({ job: claimed }));
+  });
+
+  app.post("/internal/jobs/:jobId/result", (req, res) => {
+    if (!requireWorkerToken(req, res, params.config.workerToken)) {
+      return;
+    }
+    const jobId = parseParam(req.params.jobId, "jobId", res);
+    if (!jobId) {
+      return;
+    }
+
+    const body = parseBody(JobResultRequestSchema, req, res);
+    if (!body) {
+      return;
+    }
+
+    const result = params.store.submitJobResult(jobId, body);
+    if (!result) {
+      res.status(404).json({ error: "not_found", message: `job not found: ${jobId}` });
+      return;
+    }
+
+    res.json(JobResultResponseSchema.parse(result));
   });
 
   app.post("/internal/jobs/:jobId/complete", (req, res) => {

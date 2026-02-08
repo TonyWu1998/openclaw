@@ -1,12 +1,14 @@
 import {
   ClaimJobResponseSchema,
   FailJobRequestSchema,
-  type ReceiptProcessJob,
+  JobResultRequestSchema,
+  type ClaimedJob,
+  type JobResultRequest,
 } from "@openclaw/home-inventory-contracts";
 
 export type WorkerApiClient = {
-  claimJob: () => Promise<ReceiptProcessJob | null>;
-  completeJob: (jobId: string, notes?: string) => Promise<void>;
+  claimJob: () => Promise<ClaimedJob | null>;
+  submitJobResult: (jobId: string, result: JobResultRequest) => Promise<void>;
   failJob: (jobId: string, error: string) => Promise<void>;
 };
 
@@ -24,7 +26,7 @@ export class HttpWorkerApiClient implements WorkerApiClient {
     this.workerToken = options.workerToken;
   }
 
-  async claimJob(): Promise<ReceiptProcessJob | null> {
+  async claimJob(): Promise<ClaimedJob | null> {
     const response = await fetch(`${this.baseUrl}/internal/jobs/claim`, {
       method: "POST",
       headers: this.buildHeaders(),
@@ -39,15 +41,16 @@ export class HttpWorkerApiClient implements WorkerApiClient {
     return ClaimJobResponseSchema.parse(payload).job;
   }
 
-  async completeJob(jobId: string, notes?: string): Promise<void> {
-    const response = await fetch(`${this.baseUrl}/internal/jobs/${jobId}/complete`, {
+  async submitJobResult(jobId: string, result: JobResultRequest): Promise<void> {
+    const body = JobResultRequestSchema.parse(result);
+    const response = await fetch(`${this.baseUrl}/internal/jobs/${jobId}/result`, {
       method: "POST",
       headers: this.buildHeaders(),
-      body: JSON.stringify({ notes }),
+      body: JSON.stringify(body),
     });
 
     if (!response.ok) {
-      throw new Error(`failed to complete job ${jobId}: ${response.status}`);
+      throw new Error(`failed to submit result for job ${jobId}: ${response.status}`);
     }
   }
 

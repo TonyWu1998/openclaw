@@ -1,31 +1,62 @@
 import { describe, expect, it, vi } from "vitest";
-import type { ReceiptProcessJob } from "@openclaw/home-inventory-contracts";
+import type { ClaimedJob, JobResultRequest } from "@openclaw/home-inventory-contracts";
 import type { WorkerApiClient } from "../client/api-client.js";
 import type { ReceiptProcessor } from "../processor/receipt-processor.js";
 import { WorkerRunner } from "./worker-runner.js";
 
-function createJob(): ReceiptProcessJob {
+function createClaimedJob(): ClaimedJob {
   return {
-    jobId: "job_1",
-    receiptUploadId: "receipt_1",
-    householdId: "household_1",
-    status: "processing",
-    attempts: 1,
-    createdAt: "2026-02-08T12:00:00.000Z",
-    updatedAt: "2026-02-08T12:01:00.000Z",
+    job: {
+      jobId: "job_1",
+      receiptUploadId: "receipt_1",
+      householdId: "household_1",
+      status: "processing",
+      attempts: 1,
+      createdAt: "2026-02-08T12:00:00.000Z",
+      updatedAt: "2026-02-08T12:01:00.000Z",
+    },
+    receipt: {
+      receiptUploadId: "receipt_1",
+      householdId: "household_1",
+      filename: "receipt.jpg",
+      contentType: "image/jpeg",
+      path: "receipts/household_1/receipt_1/receipt.jpg",
+      status: "processing",
+      createdAt: "2026-02-08T12:00:00.000Z",
+      updatedAt: "2026-02-08T12:01:00.000Z",
+      ocrText: "Rice 2kg",
+    },
+  };
+}
+
+function createResult(): JobResultRequest {
+  return {
+    ocrText: "Rice 2kg",
+    items: [
+      {
+        itemKey: "rice",
+        rawName: "Rice 2kg",
+        normalizedName: "rice",
+        quantity: 2,
+        unit: "kg",
+        category: "grain",
+        confidence: 0.9,
+      },
+    ],
+    notes: "done",
   };
 }
 
 describe("WorkerRunner", () => {
-  it("completes a claimed job", async () => {
+  it("submits processed results for claimed jobs", async () => {
     const client: WorkerApiClient = {
-      claimJob: vi.fn(async () => createJob()),
-      completeJob: vi.fn(async () => {}),
+      claimJob: vi.fn(async () => createClaimedJob()),
+      submitJobResult: vi.fn(async () => {}),
       failJob: vi.fn(async () => {}),
     };
 
     const processor: ReceiptProcessor = {
-      process: vi.fn(async () => ({ notes: "done" })),
+      process: vi.fn(async () => createResult()),
     };
 
     const runner = new WorkerRunner({
@@ -39,14 +70,14 @@ describe("WorkerRunner", () => {
 
     expect(handled).toBe(true);
     expect(processor.process).toHaveBeenCalledTimes(1);
-    expect(client.completeJob).toHaveBeenCalledWith("job_1", "done");
+    expect(client.submitJobResult).toHaveBeenCalledWith("job_1", createResult());
     expect(client.failJob).not.toHaveBeenCalled();
   });
 
-  it("fails the job when processor throws", async () => {
+  it("fails job when processor throws", async () => {
     const client: WorkerApiClient = {
-      claimJob: vi.fn(async () => createJob()),
-      completeJob: vi.fn(async () => {}),
+      claimJob: vi.fn(async () => createClaimedJob()),
+      submitJobResult: vi.fn(async () => {}),
       failJob: vi.fn(async () => {}),
     };
 
@@ -67,18 +98,18 @@ describe("WorkerRunner", () => {
 
     expect(handled).toBe(true);
     expect(client.failJob).toHaveBeenCalledWith("job_1", "extraction timeout");
-    expect(client.completeJob).not.toHaveBeenCalled();
+    expect(client.submitJobResult).not.toHaveBeenCalled();
   });
 
   it("returns false when no job is available", async () => {
     const client: WorkerApiClient = {
       claimJob: vi.fn(async () => null),
-      completeJob: vi.fn(async () => {}),
+      submitJobResult: vi.fn(async () => {}),
       failJob: vi.fn(async () => {}),
     };
 
     const processor: ReceiptProcessor = {
-      process: vi.fn(async () => ({ notes: "unused" })),
+      process: vi.fn(async () => createResult()),
     };
 
     const runner = new WorkerRunner({

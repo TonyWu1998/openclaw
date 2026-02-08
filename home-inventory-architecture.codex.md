@@ -2,6 +2,13 @@
 
 Last updated: 2026-02-08
 
+## Milestone Status
+
+- [x] Phase 1 completed and merged (`PR #1`): backend foundation, contracts, queue skeleton, migration baseline.
+- [ ] Phase 2 in progress: receipt extraction + normalization + inventory mutation events.
+- [ ] Phase 3 pending: agent-driven optimization jobs and feedback loop.
+- [ ] Phase 4 pending: backend validation and hardening gates before UI/mobile integration.
+
 ## Purpose
 
 This document is the execution-ready architecture brief for building a home inventory app (web + iOS) on top of OpenClaw.

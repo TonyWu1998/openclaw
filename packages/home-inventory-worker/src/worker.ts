@@ -1,5 +1,5 @@
 import { HttpWorkerApiClient } from "./client/api-client.js";
-import { NoopReceiptProcessor } from "./processor/receipt-processor.js";
+import { createReceiptProcessorFromEnv } from "./processor/receipt-processor.js";
 import { WorkerRunner } from "./runner/worker-runner.js";
 
 function readEnv(env: NodeJS.ProcessEnv = process.env) {
@@ -19,7 +19,7 @@ async function main() {
 
   const runner = new WorkerRunner({
     client,
-    processor: new NoopReceiptProcessor(),
+    processor: createReceiptProcessorFromEnv(),
     pollIntervalMs: Number.isFinite(env.pollIntervalMs) ? env.pollIntervalMs : 3000,
   });
 

@@ -144,6 +144,23 @@ describe("home inventory api", () => {
 
     expect(resultResponse.status).toBe(200);
 
+    const duplicateResultResponse = await fetch(`${baseUrl}/internal/jobs/${enqueuePayload.job.jobId}/result`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-home-inventory-worker-token": "test-worker-token",
+      },
+      body: JSON.stringify({
+        merchantName: "Fresh Market",
+        purchasedAt: "2026-02-08T12:00:00.000Z",
+        ocrText: "Jasmine Rice 2kg\nTomato x4",
+        items: testItems(),
+        notes: "phase2 extractor complete",
+      }),
+    });
+
+    expect(duplicateResultResponse.status).toBe(200);
+
     const statusResponse = await fetch(`${baseUrl}/v1/jobs/${enqueuePayload.job.jobId}`);
     expect(statusResponse.status).toBe(200);
     const statusPayload = (await statusResponse.json()) as { job: { status: string; notes?: string } };

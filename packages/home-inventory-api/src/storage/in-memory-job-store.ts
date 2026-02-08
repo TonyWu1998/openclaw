@@ -173,6 +173,18 @@ export class InMemoryJobStore implements ReceiptJobStore {
       return null;
     }
 
+    // Idempotency guard: retries after a successful submit should not duplicate lot quantities/events.
+    if (job.status === "completed") {
+      return {
+        job: clone(job),
+        receipt: clone(upload),
+      };
+    }
+
+    if (job.status !== "processing" && job.status !== "queued") {
+      return null;
+    }
+
     const now = nowIso();
 
     const receipt: ReceiptDetailsResponse["receipt"] = {

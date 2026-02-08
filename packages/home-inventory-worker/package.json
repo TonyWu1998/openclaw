@@ -1,0 +1,18 @@
+{
+  "name": "@openclaw/home-inventory-worker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Phase 1 queue worker skeleton for home inventory",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "dev": "tsx src/worker.ts",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@openclaw/home-inventory-contracts": "workspace:*"
+  }
+}

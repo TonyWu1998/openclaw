@@ -562,6 +562,27 @@ importers:
         specifier: workspace:*
         version: link:../..
 
+  packages/home-inventory-api:
+    dependencies:
+      '@openclaw/home-inventory-contracts':
+        specifier: workspace:*
+        version: link:../home-inventory-contracts
+      express:
+        specifier: ^5.2.1
+        version: 5.2.1
+
+  packages/home-inventory-contracts:
+    dependencies:
+      zod:
+        specifier: ^4.3.6
+        version: 4.3.6
+
+  packages/home-inventory-worker:
+    dependencies:
+      '@openclaw/home-inventory-contracts':
+        specifier: workspace:*
+        version: link:../home-inventory-contracts
+
   packages/moltbot:
     dependencies:
       openclaw:

@@ -133,6 +133,7 @@
 ## Agent-Specific Notes
 
 - Vocabulary: "makeup" = "mac app".
+- Home inventory app architecture handoff for follow-on agents: `home-inventory-architecture.codex.md`.
 - Never edit `node_modules` (global/Homebrew/npm/git installs too). Updates overwrite. Skill notes go in `tools.md` or `AGENTS.md`.
 - Signal: "update fly" => `fly ssh console -a flawd-bot -C "bash -lc 'cd /data/clawd/openclaw && git pull --rebase origin main'"` then `fly machines restart e825232f34d058 -a flawd-bot`.
 - When working on a GitHub Issue or PR, print the full URL at the end of the task.

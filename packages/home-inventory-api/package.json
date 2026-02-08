@@ -1,0 +1,19 @@
+{
+  "name": "@openclaw/home-inventory-api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Phase 1 backend API skeleton for the home inventory app",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "dev": "tsx src/server.ts",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@openclaw/home-inventory-contracts": "workspace:*",
+    "express": "^5.2.1"
+  }
+}

@@ -1,12 +1,18 @@
 import type {
   ClaimedJob,
+  DailyRecommendationsResponse,
+  GenerateDailyRecommendationsRequest,
+  GenerateWeeklyRecommendationsRequest,
   InventorySnapshotResponse,
   JobResultRequest,
+  RecommendationFeedbackRecord,
+  RecommendationFeedbackRequest,
   ReceiptDetailsResponse,
   ReceiptProcessJob,
   ReceiptProcessRequest,
   ReceiptUploadRequest,
   ReceiptUploadResponse,
+  WeeklyRecommendationsResponse,
 } from "@openclaw/home-inventory-contracts";
 
 export type ReceiptJobStore = {
@@ -19,11 +25,28 @@ export type ReceiptJobStore = {
   getJob: (jobId: string) => ReceiptProcessJob | null;
   getReceipt: (receiptUploadId: string) => ReceiptDetailsResponse | null;
   claimNextJob: () => ClaimedJob | null;
-  submitJobResult: (jobId: string, result: JobResultRequest) => {
+  submitJobResult: (
+    jobId: string,
+    result: JobResultRequest,
+  ) => {
     job: ReceiptProcessJob;
     receipt: ReceiptDetailsResponse["receipt"];
   } | null;
   completeJob: (jobId: string, notes?: string) => ReceiptProcessJob | null;
   failJob: (jobId: string, error: string) => ReceiptProcessJob | null;
   getInventory: (householdId: string) => InventorySnapshotResponse;
+  generateDailyRecommendations: (
+    householdId: string,
+    request: GenerateDailyRecommendationsRequest,
+  ) => Promise<DailyRecommendationsResponse>;
+  getDailyRecommendations: (householdId: string) => DailyRecommendationsResponse | null;
+  generateWeeklyRecommendations: (
+    householdId: string,
+    request: GenerateWeeklyRecommendationsRequest,
+  ) => Promise<WeeklyRecommendationsResponse>;
+  getWeeklyRecommendations: (householdId: string) => WeeklyRecommendationsResponse | null;
+  recordRecommendationFeedback: (
+    recommendationId: string,
+    request: RecommendationFeedbackRequest,
+  ) => RecommendationFeedbackRecord | null;
 };

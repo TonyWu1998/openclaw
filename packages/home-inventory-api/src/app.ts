@@ -1,21 +1,27 @@
-import express from "express";
 import type { Express } from "express";
 import {
   ClaimJobResponseSchema,
   CompleteJobRequestSchema,
+  DailyRecommendationsResponseSchema,
   EnqueueJobResponseSchema,
   FailJobRequestSchema,
+  GenerateDailyRecommendationsRequestSchema,
+  GenerateWeeklyRecommendationsRequestSchema,
   HealthResponseSchema,
   JobResultRequestSchema,
   JobResultResponseSchema,
+  RecommendationFeedbackRequestSchema,
+  RecommendationFeedbackResponseSchema,
   ReceiptDetailsResponseSchema,
   ReceiptProcessRequestSchema,
   ReceiptUploadRequestSchema,
+  WeeklyRecommendationsResponseSchema,
   type HealthResponse,
 } from "@openclaw/home-inventory-contracts";
+import express from "express";
 import type { ApiConfig } from "./config/env.js";
-import { parseBody, parseParam, requireWorkerToken } from "./routes/http-utils.js";
 import type { ReceiptJobStore } from "./types/job-store.js";
+import { parseBody, parseParam, requireWorkerToken } from "./routes/http-utils.js";
 
 type CreateAppParams = {
   config: ApiConfig;
@@ -53,7 +59,9 @@ export function createApp(params: CreateAppParams): Express {
 
     const receipt = params.store.getReceipt(receiptUploadId);
     if (!receipt) {
-      res.status(404).json({ error: "not_found", message: `receipt not found: ${receiptUploadId}` });
+      res
+        .status(404)
+        .json({ error: "not_found", message: `receipt not found: ${receiptUploadId}` });
       return;
     }
 
@@ -104,6 +112,95 @@ export function createApp(params: CreateAppParams): Express {
 
     const snapshot = params.store.getInventory(householdId);
     res.json(snapshot);
+  });
+
+  app.get("/v1/recommendations/:householdId/daily", (req, res) => {
+    const householdId = parseParam(req.params.householdId, "householdId", res);
+    if (!householdId) {
+      return;
+    }
+
+    const recommendations = params.store.getDailyRecommendations(householdId);
+    if (!recommendations) {
+      res.status(404).json({
+        error: "not_found",
+        message: `daily recommendations not found for household: ${householdId}`,
+      });
+      return;
+    }
+
+    res.json(DailyRecommendationsResponseSchema.parse(recommendations));
+  });
+
+  app.post("/v1/recommendations/:householdId/daily/generate", async (req, res) => {
+    const householdId = parseParam(req.params.householdId, "householdId", res);
+    if (!householdId) {
+      return;
+    }
+
+    const body = parseBody(GenerateDailyRecommendationsRequestSchema, req, res);
+    if (!body) {
+      return;
+    }
+
+    const generated = await params.store.generateDailyRecommendations(householdId, body);
+    res.json(DailyRecommendationsResponseSchema.parse(generated));
+  });
+
+  app.get("/v1/recommendations/:householdId/weekly", (req, res) => {
+    const householdId = parseParam(req.params.householdId, "householdId", res);
+    if (!householdId) {
+      return;
+    }
+
+    const recommendations = params.store.getWeeklyRecommendations(householdId);
+    if (!recommendations) {
+      res.status(404).json({
+        error: "not_found",
+        message: `weekly recommendations not found for household: ${householdId}`,
+      });
+      return;
+    }
+
+    res.json(WeeklyRecommendationsResponseSchema.parse(recommendations));
+  });
+
+  app.post("/v1/recommendations/:householdId/weekly/generate", async (req, res) => {
+    const householdId = parseParam(req.params.householdId, "householdId", res);
+    if (!householdId) {
+      return;
+    }
+
+    const body = parseBody(GenerateWeeklyRecommendationsRequestSchema, req, res);
+    if (!body) {
+      return;
+    }
+
+    const generated = await params.store.generateWeeklyRecommendations(householdId, body);
+    res.json(WeeklyRecommendationsResponseSchema.parse(generated));
+  });
+
+  app.post("/v1/recommendations/:recommendationId/feedback", (req, res) => {
+    const recommendationId = parseParam(req.params.recommendationId, "recommendationId", res);
+    if (!recommendationId) {
+      return;
+    }
+
+    const body = parseBody(RecommendationFeedbackRequestSchema, req, res);
+    if (!body) {
+      return;
+    }
+
+    const feedback = params.store.recordRecommendationFeedback(recommendationId, body);
+    if (!feedback) {
+      res.status(404).json({
+        error: "not_found",
+        message: `recommendation not found: ${recommendationId}`,
+      });
+      return;
+    }
+
+    res.json(RecommendationFeedbackResponseSchema.parse({ feedback }));
   });
 
   app.post("/internal/jobs/claim", (req, res) => {

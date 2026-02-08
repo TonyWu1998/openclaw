@@ -1,0 +1,17 @@
+{
+  "id": "home-inventory",
+  "name": "Home Inventory",
+  "description": "Gateway methods and scheduler hooks for home inventory planning and feedback loops.",
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "apiBaseUrl": { "type": "string", "description": "Inventory API base URL" },
+      "defaultHouseholdId": { "type": "string" },
+      "scheduleEnabled": { "type": "boolean" },
+      "dailyHour": { "type": "number" },
+      "weeklyDay": { "type": "number", "description": "0=Sunday..6=Saturday" },
+      "weeklyHour": { "type": "number" }
+    }
+  }
+}

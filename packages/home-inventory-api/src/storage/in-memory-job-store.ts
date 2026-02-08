@@ -1,25 +1,42 @@
-import { randomUUID } from "node:crypto";
 import type {
   ClaimedJob,
+  DailyRecommendationsResponse,
+  GenerateDailyRecommendationsRequest,
+  GenerateWeeklyRecommendationsRequest,
   InventoryEvent,
   InventorySnapshotResponse,
   InventoryLot,
   JobResultRequest,
+  RecommendationFeedbackRecord,
+  RecommendationFeedbackRequest,
+  RecommendationRun,
+  RecommendationRunType,
   ReceiptDetailsResponse,
   ReceiptItem,
   ReceiptProcessJob,
   ReceiptProcessRequest,
   ReceiptUploadRequest,
   ReceiptUploadResponse,
+  WeeklyRecommendationsResponse,
 } from "@openclaw/home-inventory-contracts";
+import { randomUUID } from "node:crypto";
 import type { ReceiptJobStore } from "../types/job-store.js";
+import {
+  createRecommendationPlannerFromEnv,
+  type RecommendationPlanner,
+} from "../domain/recommendation-planner.js";
 
 type InMemoryJobStoreOptions = {
   uploadOrigin?: string;
+  recommendationPlanner?: RecommendationPlanner;
 };
 
 function nowIso(): string {
   return new Date().toISOString();
+}
+
+function todayIsoDate(): string {
+  return new Date().toISOString().slice(0, 10);
 }
 
 function clone<T>(value: T): T {
@@ -32,10 +49,20 @@ export class InMemoryJobStore implements ReceiptJobStore {
   private readonly queue: string[] = [];
   private readonly inventoryLots = new Map<string, InventoryLot[]>();
   private readonly inventoryEvents = new Map<string, InventoryEvent[]>();
+  private readonly dailyRecommendations = new Map<string, DailyRecommendationsResponse>();
+  private readonly weeklyRecommendations = new Map<string, WeeklyRecommendationsResponse>();
+  private readonly feedbackRecords: RecommendationFeedbackRecord[] = [];
+  private readonly recommendationIndex = new Map<
+    string,
+    { householdId: string; itemKeys: string[] }
+  >();
   private readonly uploadOrigin: string;
+  private readonly recommendationPlanner: RecommendationPlanner;
 
   constructor(options: InMemoryJobStoreOptions = {}) {
     this.uploadOrigin = options.uploadOrigin ?? "https://uploads.example.local";
+    this.recommendationPlanner =
+      options.recommendationPlanner ?? createRecommendationPlannerFromEnv();
   }
 
   createUpload(request: ReceiptUploadRequest): ReceiptUploadResponse {
@@ -258,8 +285,12 @@ export class InMemoryJobStore implements ReceiptJobStore {
   }
 
   getInventory(householdId: string): InventorySnapshotResponse {
-    const lots = clone(this.inventoryLots.get(householdId) ?? []).sort((a, b) => a.itemKey.localeCompare(b.itemKey));
-    const events = clone(this.inventoryEvents.get(householdId) ?? []).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+    const lots = clone(this.inventoryLots.get(householdId) ?? []).toSorted((a, b) =>
+      a.itemKey.localeCompare(b.itemKey),
+    );
+    const events = clone(this.inventoryEvents.get(householdId) ?? []).toSorted((a, b) =>
+      b.createdAt.localeCompare(a.createdAt),
+    );
 
     return {
       householdId,
@@ -268,7 +299,178 @@ export class InMemoryJobStore implements ReceiptJobStore {
     };
   }
 
-  private applyInventoryMutations(householdId: string, items: ReceiptItem[], purchasedAt?: string): void {
+  async generateDailyRecommendations(
+    householdId: string,
+    request: GenerateDailyRecommendationsRequest,
+  ): Promise<DailyRecommendationsResponse> {
+    const targetDate = request.date ?? todayIsoDate();
+    const inventory = this.getInventory(householdId);
+    const feedbackByItem = this.buildFeedbackByItem(householdId);
+
+    const generated = await this.recommendationPlanner.generateDaily({
+      householdId,
+      targetDate,
+      inventory,
+      feedbackByItem,
+    });
+
+    const run = this.createRun(householdId, "daily", generated.model, targetDate);
+
+    const response: DailyRecommendationsResponse = {
+      run,
+      recommendations: generated.recommendations.map((entry) => {
+        const recommendationId = `rec_${randomUUID()}`;
+        this.recommendationIndex.set(recommendationId, {
+          householdId,
+          itemKeys: clone(entry.itemKeys),
+        });
+
+        return {
+          recommendationId,
+          householdId,
+          mealDate: targetDate,
+          title: entry.title,
+          cuisine: entry.cuisine,
+          rationale: entry.rationale,
+          itemKeys: entry.itemKeys,
+          score: entry.score,
+        };
+      }),
+    };
+
+    this.dailyRecommendations.set(householdId, clone(response));
+    return response;
+  }
+
+  getDailyRecommendations(householdId: string): DailyRecommendationsResponse | null {
+    const result = this.dailyRecommendations.get(householdId);
+    return result ? clone(result) : null;
+  }
+
+  async generateWeeklyRecommendations(
+    householdId: string,
+    request: GenerateWeeklyRecommendationsRequest,
+  ): Promise<WeeklyRecommendationsResponse> {
+    const weekOf = request.weekOf ?? todayIsoDate();
+    const inventory = this.getInventory(householdId);
+    const feedbackByItem = this.buildFeedbackByItem(householdId);
+
+    const generated = await this.recommendationPlanner.generateWeekly({
+      householdId,
+      targetDate: weekOf,
+      inventory,
+      feedbackByItem,
+    });
+
+    const run = this.createRun(householdId, "weekly", generated.model, weekOf);
+
+    const response: WeeklyRecommendationsResponse = {
+      run,
+      recommendations: generated.recommendations.map((entry) => {
+        const recommendationId = `rec_${randomUUID()}`;
+        this.recommendationIndex.set(recommendationId, {
+          householdId,
+          itemKeys: [entry.itemKey],
+        });
+
+        return {
+          recommendationId,
+          householdId,
+          weekOf,
+          itemKey: entry.itemKey,
+          itemName: entry.itemName,
+          quantity: entry.quantity,
+          unit: entry.unit,
+          priority: entry.priority,
+          rationale: entry.rationale,
+          score: entry.score,
+        };
+      }),
+    };
+
+    this.weeklyRecommendations.set(householdId, clone(response));
+    return response;
+  }
+
+  getWeeklyRecommendations(householdId: string): WeeklyRecommendationsResponse | null {
+    const result = this.weeklyRecommendations.get(householdId);
+    return result ? clone(result) : null;
+  }
+
+  recordRecommendationFeedback(
+    recommendationId: string,
+    request: RecommendationFeedbackRequest,
+  ): RecommendationFeedbackRecord | null {
+    const recommendation = this.recommendationIndex.get(recommendationId);
+    if (!recommendation || recommendation.householdId !== request.householdId) {
+      return null;
+    }
+
+    const feedback: RecommendationFeedbackRecord = {
+      feedbackId: `feedback_${randomUUID()}`,
+      recommendationId,
+      householdId: request.householdId,
+      signalType: request.signalType,
+      signalValue: request.signalValue ?? defaultSignalValue(request.signalType),
+      context: request.context,
+      createdAt: nowIso(),
+    };
+
+    this.feedbackRecords.push(feedback);
+    return clone(feedback);
+  }
+
+  private createRun(
+    householdId: string,
+    runType: RecommendationRunType,
+    model: string,
+    targetDate: string,
+  ): RecommendationRun {
+    return {
+      runId: `run_${randomUUID()}`,
+      householdId,
+      runType,
+      model,
+      createdAt: nowIso(),
+      targetDate,
+    };
+  }
+
+  private buildFeedbackByItem(householdId: string): Record<string, number> {
+    const sums = new Map<string, number>();
+    const counts = new Map<string, number>();
+
+    for (const feedback of this.feedbackRecords) {
+      if (feedback.householdId !== householdId) {
+        continue;
+      }
+
+      const indexed = this.recommendationIndex.get(feedback.recommendationId);
+      if (!indexed) {
+        continue;
+      }
+
+      const value = feedback.signalValue;
+      for (const itemKey of indexed.itemKeys) {
+        sums.set(itemKey, (sums.get(itemKey) ?? 0) + value);
+        counts.set(itemKey, (counts.get(itemKey) ?? 0) + 1);
+      }
+    }
+
+    const result: Record<string, number> = {};
+    for (const [itemKey, sum] of sums) {
+      const count = counts.get(itemKey) ?? 1;
+      result[itemKey] = Number.parseFloat((sum / count).toFixed(3));
+    }
+
+    return result;
+  }
+
+  private applyInventoryMutations(
+    householdId: string,
+    items: ReceiptItem[],
+    purchasedAt?: string,
+  ): void {
     const lots = this.inventoryLots.get(householdId) ?? [];
     const events = this.inventoryEvents.get(householdId) ?? [];
 
@@ -318,5 +520,24 @@ export class InMemoryJobStore implements ReceiptJobStore {
 
     this.inventoryLots.set(householdId, lots);
     this.inventoryEvents.set(householdId, events);
+  }
+}
+
+function defaultSignalValue(signalType: RecommendationFeedbackRequest["signalType"]): number {
+  switch (signalType) {
+    case "accepted":
+      return 1;
+    case "consumed":
+      return 0.75;
+    case "edited":
+      return 0.25;
+    case "ignored":
+      return -0.25;
+    case "rejected":
+      return -0.75;
+    case "wasted":
+      return -1;
+    default:
+      return 0;
   }
 }

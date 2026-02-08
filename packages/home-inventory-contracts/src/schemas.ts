@@ -159,6 +159,89 @@ export const InventorySnapshotResponseSchema = z.object({
   events: z.array(InventoryEventSchema),
 });
 
+export const RecommendationRunTypeSchema = z.enum(["daily", "weekly"]);
+export const RecommendationPrioritySchema = z.enum(["high", "medium", "low"]);
+export const FeedbackSignalTypeSchema = z.enum([
+  "accepted",
+  "rejected",
+  "edited",
+  "ignored",
+  "consumed",
+  "wasted",
+]);
+
+export const RecommendationRunSchema = z.object({
+  runId: IdSchema,
+  householdId: IdSchema,
+  runType: RecommendationRunTypeSchema,
+  model: z.string().min(1).max(120),
+  createdAt: z.iso.datetime(),
+  targetDate: z.iso.date(),
+});
+
+export const DailyMealRecommendationSchema = z.object({
+  recommendationId: IdSchema,
+  householdId: IdSchema,
+  mealDate: z.iso.date(),
+  title: z.string().min(1).max(200),
+  cuisine: z.string().min(1).max(80),
+  rationale: z.string().min(1).max(500),
+  itemKeys: z.array(z.string().min(1).max(160)).min(1),
+  score: z.number().min(0).max(1),
+});
+
+export const WeeklyPurchaseRecommendationSchema = z.object({
+  recommendationId: IdSchema,
+  householdId: IdSchema,
+  weekOf: z.iso.date(),
+  itemKey: z.string().min(1).max(160),
+  itemName: z.string().min(1).max(240),
+  quantity: z.number().positive(),
+  unit: UnitSchema,
+  priority: RecommendationPrioritySchema,
+  rationale: z.string().min(1).max(500),
+  score: z.number().min(0).max(1),
+});
+
+export const GenerateDailyRecommendationsRequestSchema = z.object({
+  date: z.iso.date().optional(),
+});
+
+export const GenerateWeeklyRecommendationsRequestSchema = z.object({
+  weekOf: z.iso.date().optional(),
+});
+
+export const DailyRecommendationsResponseSchema = z.object({
+  run: RecommendationRunSchema,
+  recommendations: z.array(DailyMealRecommendationSchema),
+});
+
+export const WeeklyRecommendationsResponseSchema = z.object({
+  run: RecommendationRunSchema,
+  recommendations: z.array(WeeklyPurchaseRecommendationSchema),
+});
+
+export const RecommendationFeedbackRequestSchema = z.object({
+  householdId: IdSchema,
+  signalType: FeedbackSignalTypeSchema,
+  signalValue: z.number().min(-1).max(1).optional(),
+  context: z.string().max(500).optional(),
+});
+
+export const RecommendationFeedbackRecordSchema = z.object({
+  feedbackId: IdSchema,
+  recommendationId: IdSchema,
+  householdId: IdSchema,
+  signalType: FeedbackSignalTypeSchema,
+  signalValue: z.number().min(-1).max(1),
+  context: z.string().max(500).optional(),
+  createdAt: z.iso.datetime(),
+});
+
+export const RecommendationFeedbackResponseSchema = z.object({
+  feedback: RecommendationFeedbackRecordSchema,
+});
+
 export const HealthResponseSchema = z.object({
   ok: z.literal(true),
   service: z.literal("home-inventory-api"),
@@ -187,4 +270,21 @@ export type FailJobRequest = z.infer<typeof FailJobRequestSchema>;
 export type InventoryLot = z.infer<typeof InventoryLotSchema>;
 export type InventoryEvent = z.infer<typeof InventoryEventSchema>;
 export type InventorySnapshotResponse = z.infer<typeof InventorySnapshotResponseSchema>;
+export type RecommendationRunType = z.infer<typeof RecommendationRunTypeSchema>;
+export type RecommendationPriority = z.infer<typeof RecommendationPrioritySchema>;
+export type FeedbackSignalType = z.infer<typeof FeedbackSignalTypeSchema>;
+export type RecommendationRun = z.infer<typeof RecommendationRunSchema>;
+export type DailyMealRecommendation = z.infer<typeof DailyMealRecommendationSchema>;
+export type WeeklyPurchaseRecommendation = z.infer<typeof WeeklyPurchaseRecommendationSchema>;
+export type GenerateDailyRecommendationsRequest = z.infer<
+  typeof GenerateDailyRecommendationsRequestSchema
+>;
+export type GenerateWeeklyRecommendationsRequest = z.infer<
+  typeof GenerateWeeklyRecommendationsRequestSchema
+>;
+export type DailyRecommendationsResponse = z.infer<typeof DailyRecommendationsResponseSchema>;
+export type WeeklyRecommendationsResponse = z.infer<typeof WeeklyRecommendationsResponseSchema>;
+export type RecommendationFeedbackRequest = z.infer<typeof RecommendationFeedbackRequestSchema>;
+export type RecommendationFeedbackRecord = z.infer<typeof RecommendationFeedbackRecordSchema>;
+export type RecommendationFeedbackResponse = z.infer<typeof RecommendationFeedbackResponseSchema>;
 export type HealthResponse = z.infer<typeof HealthResponseSchema>;

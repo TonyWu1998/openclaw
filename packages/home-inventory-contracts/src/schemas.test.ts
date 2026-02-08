@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
   ClaimJobResponseSchema,
+  DailyRecommendationsResponseSchema,
   JobResultRequestSchema,
   JobStatusSchema,
+  RecommendationFeedbackRequestSchema,
   ReceiptDetailsResponseSchema,
   ReceiptItemSchema,
   ReceiptUploadResponseSchema,
@@ -99,5 +101,43 @@ describe("home inventory contract schemas", () => {
     });
 
     expect(parsed.receipt.items?.length).toBe(1);
+  });
+
+  it("validates daily recommendation response", () => {
+    const parsed = DailyRecommendationsResponseSchema.parse({
+      run: {
+        runId: "run_1",
+        householdId: "household_1",
+        runType: "daily",
+        model: "openai/gpt-5.2-mini",
+        createdAt: "2026-02-08T12:00:00.000Z",
+        targetDate: "2026-02-09",
+      },
+      recommendations: [
+        {
+          recommendationId: "rec_1",
+          householdId: "household_1",
+          mealDate: "2026-02-09",
+          title: "Tomato rice bowl",
+          cuisine: "chinese",
+          rationale: "Uses expiring produce first.",
+          itemKeys: ["tomato", "rice"],
+          score: 0.85,
+        },
+      ],
+    });
+
+    expect(parsed.recommendations[0]?.score).toBe(0.85);
+  });
+
+  it("validates recommendation feedback request", () => {
+    const parsed = RecommendationFeedbackRequestSchema.parse({
+      householdId: "household_1",
+      signalType: "accepted",
+      signalValue: 1,
+      context: "Cooked this for dinner",
+    });
+
+    expect(parsed.signalType).toBe("accepted");
   });
 });

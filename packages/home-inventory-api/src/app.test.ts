@@ -1,8 +1,8 @@
+import type { ReceiptItem } from "@openclaw/home-inventory-contracts";
 import type { AddressInfo } from "node:net";
 import { afterEach, describe, expect, it } from "vitest";
-import type { ReceiptItem } from "@openclaw/home-inventory-contracts";
-import { createApp } from "./app.js";
 import type { ApiConfig } from "./config/env.js";
+import { createApp } from "./app.js";
 import { InMemoryJobStore } from "./storage/in-memory-job-store.js";
 
 type RunningTestServer = {
@@ -96,19 +96,24 @@ describe("home inventory api", () => {
     expect(uploadResponse.status).toBe(201);
     const uploadPayload = (await uploadResponse.json()) as { receiptUploadId: string };
 
-    const enqueueResponse = await fetch(`${baseUrl}/v1/receipts/${uploadPayload.receiptUploadId}/process`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        householdId: "household_main",
-        ocrText: "Jasmine Rice 2kg\nTomato x4",
-        merchantName: "Fresh Market",
-        purchasedAt: "2026-02-08T12:00:00.000Z",
-      }),
-    });
+    const enqueueResponse = await fetch(
+      `${baseUrl}/v1/receipts/${uploadPayload.receiptUploadId}/process`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          householdId: "household_main",
+          ocrText: "Jasmine Rice 2kg\nTomato x4",
+          merchantName: "Fresh Market",
+          purchasedAt: "2026-02-08T12:00:00.000Z",
+        }),
+      },
+    );
 
     expect(enqueueResponse.status).toBe(202);
-    const enqueuePayload = (await enqueueResponse.json()) as { job: { jobId: string; status: string } };
+    const enqueuePayload = (await enqueueResponse.json()) as {
+      job: { jobId: string; status: string };
+    };
     expect(enqueuePayload.job.status).toBe("queued");
 
     const claimResponse = await fetch(`${baseUrl}/internal/jobs/claim`, {
@@ -127,43 +132,51 @@ describe("home inventory api", () => {
     expect(claimPayload.job?.job.status).toBe("processing");
     expect(claimPayload.job?.receipt.ocrText).toContain("Jasmine Rice");
 
-    const resultResponse = await fetch(`${baseUrl}/internal/jobs/${enqueuePayload.job.jobId}/result`, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        "x-home-inventory-worker-token": "test-worker-token",
+    const resultResponse = await fetch(
+      `${baseUrl}/internal/jobs/${enqueuePayload.job.jobId}/result`,
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-home-inventory-worker-token": "test-worker-token",
+        },
+        body: JSON.stringify({
+          merchantName: "Fresh Market",
+          purchasedAt: "2026-02-08T12:00:00.000Z",
+          ocrText: "Jasmine Rice 2kg\nTomato x4",
+          items: testItems(),
+          notes: "phase2 extractor complete",
+        }),
       },
-      body: JSON.stringify({
-        merchantName: "Fresh Market",
-        purchasedAt: "2026-02-08T12:00:00.000Z",
-        ocrText: "Jasmine Rice 2kg\nTomato x4",
-        items: testItems(),
-        notes: "phase2 extractor complete",
-      }),
-    });
+    );
 
     expect(resultResponse.status).toBe(200);
 
-    const duplicateResultResponse = await fetch(`${baseUrl}/internal/jobs/${enqueuePayload.job.jobId}/result`, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        "x-home-inventory-worker-token": "test-worker-token",
+    const duplicateResultResponse = await fetch(
+      `${baseUrl}/internal/jobs/${enqueuePayload.job.jobId}/result`,
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-home-inventory-worker-token": "test-worker-token",
+        },
+        body: JSON.stringify({
+          merchantName: "Fresh Market",
+          purchasedAt: "2026-02-08T12:00:00.000Z",
+          ocrText: "Jasmine Rice 2kg\nTomato x4",
+          items: testItems(),
+          notes: "phase2 extractor complete",
+        }),
       },
-      body: JSON.stringify({
-        merchantName: "Fresh Market",
-        purchasedAt: "2026-02-08T12:00:00.000Z",
-        ocrText: "Jasmine Rice 2kg\nTomato x4",
-        items: testItems(),
-        notes: "phase2 extractor complete",
-      }),
-    });
+    );
 
     expect(duplicateResultResponse.status).toBe(200);
 
     const statusResponse = await fetch(`${baseUrl}/v1/jobs/${enqueuePayload.job.jobId}`);
     expect(statusResponse.status).toBe(200);
-    const statusPayload = (await statusResponse.json()) as { job: { status: string; notes?: string } };
+    const statusPayload = (await statusResponse.json()) as {
+      job: { status: string; notes?: string };
+    };
     expect(statusPayload.job.status).toBe("completed");
     expect(statusPayload.job.notes).toBe("phase2 extractor complete");
 
@@ -186,9 +199,62 @@ describe("home inventory api", () => {
 
     expect(inventoryPayload.householdId).toBe("household_main");
     expect(inventoryPayload.lots).toHaveLength(2);
-    expect(inventoryPayload.lots.find((lot) => lot.itemKey === "jasmine-rice")?.quantityRemaining).toBe(2);
+    expect(
+      inventoryPayload.lots.find((lot) => lot.itemKey === "jasmine-rice")?.quantityRemaining,
+    ).toBe(2);
     expect(inventoryPayload.events).toHaveLength(2);
     expect(inventoryPayload.events.every((event) => event.eventType === "add")).toBe(true);
+
+    const dailyGenerateResponse = await fetch(
+      `${baseUrl}/v1/recommendations/household_main/daily/generate`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ date: "2026-02-09" }),
+      },
+    );
+
+    expect(dailyGenerateResponse.status).toBe(200);
+    const dailyPayload = (await dailyGenerateResponse.json()) as {
+      run: { runType: string; model: string };
+      recommendations: Array<{ recommendationId: string; itemKeys: string[] }>;
+    };
+    expect(dailyPayload.run.runType).toBe("daily");
+    expect(dailyPayload.recommendations.length).toBeGreaterThan(0);
+    const recommendationId = dailyPayload.recommendations[0]?.recommendationId;
+    expect(recommendationId).toBeDefined();
+
+    const feedbackResponse = await fetch(
+      `${baseUrl}/v1/recommendations/${recommendationId}/feedback`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          householdId: "household_main",
+          signalType: "accepted",
+          signalValue: 1,
+          context: "will cook this tomorrow",
+        }),
+      },
+    );
+
+    expect(feedbackResponse.status).toBe(200);
+
+    const weeklyGenerateResponse = await fetch(
+      `${baseUrl}/v1/recommendations/household_main/weekly/generate`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ weekOf: "2026-02-09" }),
+      },
+    );
+
+    expect(weeklyGenerateResponse.status).toBe(200);
+    const weeklyPayload = (await weeklyGenerateResponse.json()) as {
+      run: { runType: string };
+      recommendations: Array<{ itemKey: string }>;
+    };
+    expect(weeklyPayload.run.runType).toBe("weekly");
   });
 
   it("rejects internal worker actions without correct token", async () => {

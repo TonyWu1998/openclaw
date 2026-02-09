@@ -1,7 +1,7 @@
+import type { ClaimedJob } from "@openclaw/home-inventory-contracts";
 import { describe, expect, it } from "vitest";
-import type { ClaimedJob, JobResultRequest } from "@openclaw/home-inventory-contracts";
-import { PhaseTwoReceiptProcessor } from "./receipt-processor.js";
 import type { ReceiptExtractor } from "./types.js";
+import { PhaseTwoReceiptProcessor, resolveReceiptLlmConfigFromEnv } from "./receipt-processor.js";
 
 function claimedJob(ocrText = "Rice 2kg\nTomato x3"): ClaimedJob {
   return {
@@ -71,7 +71,7 @@ describe("PhaseTwoReceiptProcessor", () => {
       fallbackExtractor: fallback,
     });
 
-    const result = (await processor.process(claimedJob("Milk 1L"))) as JobResultRequest;
+    const result = await processor.process(claimedJob("Milk 1L"));
     expect(result.items[0]?.itemKey).toBe("milk");
     expect(result.items[0]?.category).toBe("dairy");
   });
@@ -87,5 +87,34 @@ describe("PhaseTwoReceiptProcessor", () => {
     });
 
     await expect(processor.process(claimedJob(""))).rejects.toThrow("has no OCR text");
+  });
+
+  it("resolves OpenRouter config from env with OpenRouter headers", () => {
+    const config = resolveReceiptLlmConfigFromEnv({
+      HOME_INVENTORY_LLM_PROVIDER: "openrouter",
+      OPENROUTER_API_KEY: "or-test",
+      HOME_INVENTORY_EXTRACTOR_MODEL: "openai/gpt-4o-mini",
+      HOME_INVENTORY_OPENROUTER_SITE_URL: "https://app.example.com",
+      HOME_INVENTORY_OPENROUTER_APP_NAME: "InventoryAgent",
+    });
+
+    expect(config?.provider).toBe("openrouter");
+    expect(config?.requestMode).toBe("chat_completions");
+    expect(config?.apiKey).toBe("or-test");
+    expect(config?.extraHeaders["HTTP-Referer"]).toBe("https://app.example.com");
+    expect(config?.extraHeaders["X-Title"]).toBe("InventoryAgent");
+  });
+
+  it("allows LM Studio config without API key", () => {
+    const config = resolveReceiptLlmConfigFromEnv({
+      HOME_INVENTORY_LLM_PROVIDER: "lmstudio",
+      HOME_INVENTORY_LLM_BASE_URL: "http://127.0.0.1:1234/v1",
+      HOME_INVENTORY_EXTRACTOR_MODEL: "qwen2.5-7b-instruct",
+    });
+
+    expect(config?.provider).toBe("lmstudio");
+    expect(config?.requestMode).toBe("chat_completions");
+    expect(config?.apiKey).toBeUndefined();
+    expect(config?.baseUrl).toBe("http://127.0.0.1:1234/v1");
   });
 });

@@ -38,24 +38,80 @@ export type RecommendationPlanner = {
   ) => Promise<{ model: string; recommendations: WeeklyPurchaseRecommendationDraft[] }>;
 };
 
+export type PlannerLlmProvider =
+  | "openai"
+  | "openrouter"
+  | "gemini"
+  | "lmstudio"
+  | "openai-compatible";
+export type PlannerRequestMode = "responses" | "chat_completions";
+
+export type PlannerLlmConfig = {
+  provider: PlannerLlmProvider;
+  model: string;
+  apiKey?: string;
+  baseUrl?: string;
+  requestMode: PlannerRequestMode;
+  extraHeaders: Record<string, string>;
+};
+
+const SUPPORTED_PROVIDERS: PlannerLlmProvider[] = [
+  "openai",
+  "openrouter",
+  "gemini",
+  "lmstudio",
+  "openai-compatible",
+];
+
 export function createRecommendationPlannerFromEnv(
   env: NodeJS.ProcessEnv = process.env,
 ): RecommendationPlanner {
   const fallback = new HeuristicRecommendationPlanner();
-  const apiKey = env.OPENAI_API_KEY?.trim();
-  if (!apiKey) {
+  const config = resolvePlannerLlmConfigFromEnv(env);
+  if (!config) {
     return fallback;
   }
 
-  const model = env.HOME_INVENTORY_PLANNER_MODEL?.trim() || "gpt-5.2-mini";
-  const baseUrl = env.HOME_INVENTORY_OPENAI_BASE_URL?.trim();
-
-  return new OpenAiRecommendationPlanner({
-    apiKey,
-    model,
-    baseUrl,
+  return new LlmRecommendationPlanner({
+    config,
     fallback,
   });
+}
+
+export function resolvePlannerLlmConfigFromEnv(
+  env: NodeJS.ProcessEnv = process.env,
+): PlannerLlmConfig | null {
+  const provider = parseProvider(env.HOME_INVENTORY_LLM_PROVIDER);
+  const apiKey = resolveProviderApiKey(provider, env);
+  const requiresApiKey =
+    provider === "openai" || provider === "openrouter" || provider === "gemini";
+  if (requiresApiKey && !apiKey) {
+    return null;
+  }
+
+  const model =
+    env.HOME_INVENTORY_PLANNER_MODEL?.trim() ||
+    env.HOME_INVENTORY_LLM_MODEL?.trim() ||
+    defaultModel(provider);
+
+  const baseUrl =
+    env.HOME_INVENTORY_PLANNER_BASE_URL?.trim() ||
+    env.HOME_INVENTORY_LLM_BASE_URL?.trim() ||
+    env.HOME_INVENTORY_OPENAI_BASE_URL?.trim();
+
+  const requestMode = resolveRequestMode(
+    env.HOME_INVENTORY_PLANNER_REQUEST_MODE || env.HOME_INVENTORY_LLM_REQUEST_MODE,
+    provider,
+  );
+
+  return {
+    provider,
+    model,
+    apiKey,
+    baseUrl,
+    requestMode,
+    extraHeaders: resolveProviderHeaders(provider, env),
+  };
 }
 
 class HeuristicRecommendationPlanner implements RecommendationPlanner {
@@ -127,25 +183,42 @@ class HeuristicRecommendationPlanner implements RecommendationPlanner {
   }
 }
 
-type OpenAiRecommendationPlannerOptions = {
-  apiKey: string;
-  model: string;
-  baseUrl?: string;
+type LlmRecommendationPlannerOptions = {
+  config: PlannerLlmConfig;
   timeoutMs?: number;
   fallback: RecommendationPlanner;
 };
 
-class OpenAiRecommendationPlanner implements RecommendationPlanner {
-  private readonly apiKey: string;
+type ChatCompletionsPayload = {
+  choices?: Array<{
+    message?: {
+      content?: unknown;
+    };
+  }>;
+};
+
+type ResponsesPayload = {
+  output_text?: string;
+  output?: Array<{ content?: Array<{ text?: string }> }>;
+};
+
+class LlmRecommendationPlanner implements RecommendationPlanner {
+  private readonly provider: PlannerLlmProvider;
+  private readonly apiKey?: string;
   private readonly model: string;
   private readonly baseUrl: string;
+  private readonly requestMode: PlannerRequestMode;
+  private readonly extraHeaders: Record<string, string>;
   private readonly timeoutMs: number;
   private readonly fallback: RecommendationPlanner;
 
-  constructor(options: OpenAiRecommendationPlannerOptions) {
-    this.apiKey = options.apiKey;
-    this.model = options.model;
-    this.baseUrl = options.baseUrl?.replace(/\/$/, "") ?? "https://api.openai.com/v1";
+  constructor(options: LlmRecommendationPlannerOptions) {
+    this.provider = options.config.provider;
+    this.apiKey = options.config.apiKey?.trim() || undefined;
+    this.model = options.config.model;
+    this.baseUrl = resolveBaseUrl(options.config.provider, options.config.baseUrl);
+    this.requestMode = options.config.requestMode;
+    this.extraHeaders = sanitizeHeaders(options.config.extraHeaders);
     this.timeoutMs = options.timeoutMs ?? 25000;
     this.fallback = options.fallback;
   }
@@ -154,7 +227,7 @@ class OpenAiRecommendationPlanner implements RecommendationPlanner {
     input: RecommendationPlannerInput,
   ): Promise<{ model: string; recommendations: DailyMealRecommendationDraft[] }> {
     try {
-      const response = await this.callResponsesApi({
+      const response = await this.callModel({
         systemPrompt:
           "You are a home-inventory meal planner. Return concise JSON with dinner suggestions that prioritize existing stock and previous feedback.",
         schema: {
@@ -203,7 +276,7 @@ class OpenAiRecommendationPlanner implements RecommendationPlanner {
     input: RecommendationPlannerInput,
   ): Promise<{ model: string; recommendations: WeeklyPurchaseRecommendationDraft[] }> {
     try {
-      const response = await this.callResponsesApi({
+      const response = await this.callModel({
         systemPrompt:
           "You are a home-inventory purchase planner. Return concise JSON with weekly purchase recommendations based on stock gaps and feedback.",
         schema: {
@@ -258,21 +331,49 @@ class OpenAiRecommendationPlanner implements RecommendationPlanner {
     }
   }
 
-  private async callResponsesApi(params: {
+  private async callModel(params: {
     systemPrompt: string;
     schema: Record<string, unknown>;
     userContext: string;
   }): Promise<{ recommendations: Array<Record<string, unknown>> }> {
+    const text =
+      this.requestMode === "chat_completions"
+        ? await this.callChatCompletions(params)
+        : await this.callResponses(params);
+
+    if (!text) {
+      throw new Error("planner returned empty payload");
+    }
+
+    const parsed = parseJson(text);
+    if (!parsed || typeof parsed !== "object") {
+      throw new Error("planner returned invalid payload");
+    }
+
+    const recommendations = (parsed as { recommendations?: unknown }).recommendations;
+    if (!Array.isArray(recommendations)) {
+      throw new Error("planner payload missing recommendations array");
+    }
+
+    return {
+      recommendations: recommendations.filter(
+        (entry) => entry && typeof entry === "object",
+      ) as Array<Record<string, unknown>>,
+    };
+  }
+
+  private async callResponses(params: {
+    systemPrompt: string;
+    schema: Record<string, unknown>;
+    userContext: string;
+  }): Promise<string | null> {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
 
     try {
       const response = await fetch(`${this.baseUrl}/responses`, {
         method: "POST",
-        headers: {
-          authorization: `Bearer ${this.apiKey}`,
-          "content-type": "application/json",
-        },
+        headers: this.buildHeaders(),
         body: JSON.stringify({
           model: this.model,
           input: [
@@ -298,37 +399,78 @@ class OpenAiRecommendationPlanner implements RecommendationPlanner {
       });
 
       if (!response.ok) {
-        throw new Error(`OpenAI planner failed (${response.status}): ${await response.text()}`);
+        throw new Error(
+          `planner request failed via responses (${this.provider}, ${response.status}): ${await response.text()}`,
+        );
       }
 
-      const payload = (await response.json()) as {
-        output_text?: string;
-        output?: Array<{ content?: Array<{ text?: string }> }>;
-      };
-
-      const text = extractOutputText(payload);
-      if (!text) {
-        throw new Error("planner returned empty payload");
-      }
-
-      const parsed = parseJson(text);
-      if (!parsed || typeof parsed !== "object") {
-        throw new Error("planner returned invalid payload");
-      }
-
-      const recommendations = (parsed as { recommendations?: unknown }).recommendations;
-      if (!Array.isArray(recommendations)) {
-        throw new Error("planner payload missing recommendations array");
-      }
-
-      return {
-        recommendations: recommendations.filter(
-          (entry) => entry && typeof entry === "object",
-        ) as Array<Record<string, unknown>>,
-      };
+      const payload = (await response.json()) as ResponsesPayload;
+      return extractOutputText(payload);
     } finally {
       clearTimeout(timeout);
     }
+  }
+
+  private async callChatCompletions(params: {
+    systemPrompt: string;
+    schema: Record<string, unknown>;
+    userContext: string;
+  }): Promise<string | null> {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
+
+    try {
+      const response = await fetch(`${this.baseUrl}/chat/completions`, {
+        method: "POST",
+        headers: this.buildHeaders(),
+        body: JSON.stringify({
+          model: this.model,
+          messages: [
+            {
+              role: "system",
+              content: params.systemPrompt,
+            },
+            {
+              role: "user",
+              content: params.userContext,
+            },
+          ],
+          response_format: {
+            type: "json_schema",
+            json_schema: {
+              name: "home_inventory_recommendations",
+              strict: true,
+              schema: params.schema,
+            },
+          },
+        }),
+        signal: controller.signal,
+      });
+
+      if (!response.ok) {
+        throw new Error(
+          `planner request failed via chat_completions (${this.provider}, ${response.status}): ${await response.text()}`,
+        );
+      }
+
+      const payload = (await response.json()) as ChatCompletionsPayload;
+      return extractChatCompletionText(payload);
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
+  private buildHeaders(): Record<string, string> {
+    const headers: Record<string, string> = {
+      "content-type": "application/json",
+      ...this.extraHeaders,
+    };
+
+    if (this.apiKey) {
+      headers.authorization = `Bearer ${this.apiKey}`;
+    }
+
+    return headers;
   }
 }
 
@@ -347,6 +489,131 @@ function buildPlannerContext(
     null,
     2,
   );
+}
+
+function parseProvider(value: string | undefined): PlannerLlmProvider {
+  const lowered = value?.trim().toLowerCase();
+  if (!lowered) {
+    return "openai";
+  }
+
+  const matched = SUPPORTED_PROVIDERS.find((provider) => provider === lowered);
+  return matched ?? "openai";
+}
+
+function resolveRequestMode(
+  value: string | undefined,
+  provider: PlannerLlmProvider,
+): PlannerRequestMode {
+  if (value === "responses" || value === "chat_completions") {
+    return value;
+  }
+
+  switch (provider) {
+    case "openrouter":
+    case "gemini":
+    case "lmstudio":
+    case "openai-compatible":
+      return "chat_completions";
+    case "openai":
+    default:
+      return "responses";
+  }
+}
+
+function resolveProviderApiKey(
+  provider: PlannerLlmProvider,
+  env: NodeJS.ProcessEnv,
+): string | undefined {
+  const explicit =
+    env.HOME_INVENTORY_PLANNER_API_KEY?.trim() || env.HOME_INVENTORY_LLM_API_KEY?.trim();
+  if (explicit) {
+    return explicit;
+  }
+
+  switch (provider) {
+    case "openrouter":
+      return env.OPENROUTER_API_KEY?.trim() || undefined;
+    case "gemini":
+      return env.GEMINI_API_KEY?.trim() || env.GOOGLE_API_KEY?.trim() || undefined;
+    case "openai":
+      return env.OPENAI_API_KEY?.trim() || undefined;
+    case "lmstudio":
+    case "openai-compatible":
+      return undefined;
+    default:
+      return undefined;
+  }
+}
+
+function resolveProviderHeaders(
+  provider: PlannerLlmProvider,
+  env: NodeJS.ProcessEnv,
+): Record<string, string> {
+  if (provider !== "openrouter") {
+    return {};
+  }
+
+  const referer =
+    env.HOME_INVENTORY_OPENROUTER_SITE_URL?.trim() || env.OPENROUTER_HTTP_REFERER?.trim();
+  const appName = env.HOME_INVENTORY_OPENROUTER_APP_NAME?.trim() || env.OPENROUTER_APP_NAME?.trim();
+  const headers: Record<string, string> = {};
+
+  if (referer) {
+    headers["HTTP-Referer"] = referer;
+  }
+  if (appName) {
+    headers["X-Title"] = appName;
+  }
+
+  return headers;
+}
+
+function defaultModel(provider: PlannerLlmProvider): string {
+  switch (provider) {
+    case "gemini":
+      return "gemini-2.5-flash";
+    case "openrouter":
+      return "openai/gpt-4o-mini";
+    case "lmstudio":
+    case "openai-compatible":
+      return "local-model";
+    case "openai":
+    default:
+      return "gpt-5.2-mini";
+  }
+}
+
+function resolveBaseUrl(provider: PlannerLlmProvider, override?: string): string {
+  const normalizedOverride = override?.trim();
+  if (normalizedOverride) {
+    return normalizedOverride.replace(/\/$/, "");
+  }
+
+  switch (provider) {
+    case "openrouter":
+      return "https://openrouter.ai/api/v1";
+    case "gemini":
+      return "https://generativelanguage.googleapis.com/v1beta/openai";
+    case "lmstudio":
+    case "openai-compatible":
+      return "http://127.0.0.1:1234/v1";
+    case "openai":
+    default:
+      return "https://api.openai.com/v1";
+  }
+}
+
+function sanitizeHeaders(headers: Record<string, string>): Record<string, string> {
+  const sanitized: Record<string, string> = {};
+  for (const [key, value] of Object.entries(headers)) {
+    const headerKey = key.trim();
+    const headerValue = value.trim();
+    if (headerKey.length > 0 && headerValue.length > 0) {
+      sanitized[headerKey] = headerValue;
+    }
+  }
+  return sanitized;
 }
 
 function guessCuisine(itemName: string, category: string): string {
@@ -472,10 +739,7 @@ function capitalize(value: string): string {
   return value.length > 0 ? `${value[0].toUpperCase()}${value.slice(1)}` : value;
 }
 
-function extractOutputText(payload: {
-  output_text?: string;
-  output?: Array<{ content?: Array<{ text?: string }> }>;
-}): string | null {
+function extractOutputText(payload: ResponsesPayload): string | null {
   if (typeof payload.output_text === "string" && payload.output_text.length > 0) {
     return payload.output_text;
   }
@@ -493,6 +757,31 @@ function extractOutputText(payload: {
       if (typeof content.text === "string" && content.text.length > 0) {
         parts.push(content.text);
       }
+    }
+  }
+
+  return parts.length > 0 ? parts.join("\n") : null;
+}
+
+function extractChatCompletionText(payload: ChatCompletionsPayload): string | null {
+  const content = payload.choices?.[0]?.message?.content;
+  if (typeof content === "string" && content.length > 0) {
+    return content;
+  }
+
+  if (!Array.isArray(content)) {
+    return null;
+  }
+
+  const parts: string[] = [];
+  for (const chunk of content) {
+    if (!chunk || typeof chunk !== "object") {
+      continue;
+    }
+
+    const text = (chunk as { text?: unknown }).text;
+    if (typeof text === "string" && text.length > 0) {
+      parts.push(text);
     }
   }
 

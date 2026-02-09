@@ -366,6 +366,63 @@ export const WeeklyRecommendationsResponseSchema = z.object({
   recommendations: z.array(WeeklyPurchaseRecommendationSchema),
 });
 
+export const ShoppingDraftStatusSchema = z.enum(["draft", "finalized"]);
+export const ShoppingDraftItemStatusSchema = z.enum(["planned", "skipped", "purchased"]);
+
+export const ShoppingDraftItemSchema = z.object({
+  draftItemId: IdSchema,
+  recommendationId: IdSchema.optional(),
+  itemKey: z.string().min(1).max(160),
+  itemName: z.string().min(1).max(240),
+  quantity: z.number().positive(),
+  unit: UnitSchema,
+  priority: RecommendationPrioritySchema,
+  rationale: z.string().min(1).max(500),
+  itemStatus: ShoppingDraftItemStatusSchema,
+  notes: z.string().max(300).optional(),
+  lastUnitPrice: z.number().positive().optional(),
+  avgUnitPrice30d: z.number().positive().optional(),
+  minUnitPrice90d: z.number().positive().optional(),
+  priceTrendPct: z.number().optional(),
+  priceAlert: z.boolean(),
+});
+
+export const ShoppingDraftSchema = z.object({
+  draftId: IdSchema,
+  householdId: IdSchema,
+  weekOf: z.iso.date(),
+  status: ShoppingDraftStatusSchema,
+  sourceRunId: IdSchema.optional(),
+  items: z.array(ShoppingDraftItemSchema),
+  createdAt: z.iso.datetime(),
+  updatedAt: z.iso.datetime(),
+  finalizedAt: z.iso.datetime().optional(),
+});
+
+export const ShoppingDraftGenerateRequestSchema = z.object({
+  weekOf: z.iso.date().optional(),
+  regenerate: z.boolean().optional(),
+});
+
+export const ShoppingDraftPatchItemSchema = z.object({
+  draftItemId: IdSchema,
+  quantity: z.number().positive().optional(),
+  priority: RecommendationPrioritySchema.optional(),
+  itemStatus: ShoppingDraftItemStatusSchema.optional(),
+  notes: z.string().max(300).optional(),
+});
+
+export const ShoppingDraftPatchRequestSchema = z.object({
+  householdId: IdSchema,
+  items: z.array(ShoppingDraftPatchItemSchema).min(1),
+  idempotencyKey: z.string().min(1).max(128).optional(),
+});
+
+export const ShoppingDraftResponseSchema = z.object({
+  draft: ShoppingDraftSchema,
+  updated: z.boolean().optional(),
+});
+
 export const RecommendationFeedbackRequestSchema = z.object({
   householdId: IdSchema,
   signalType: FeedbackSignalTypeSchema,
@@ -452,6 +509,14 @@ export type GenerateWeeklyRecommendationsRequest = z.infer<
 >;
 export type DailyRecommendationsResponse = z.infer<typeof DailyRecommendationsResponseSchema>;
 export type WeeklyRecommendationsResponse = z.infer<typeof WeeklyRecommendationsResponseSchema>;
+export type ShoppingDraftStatus = z.infer<typeof ShoppingDraftStatusSchema>;
+export type ShoppingDraftItemStatus = z.infer<typeof ShoppingDraftItemStatusSchema>;
+export type ShoppingDraftItem = z.infer<typeof ShoppingDraftItemSchema>;
+export type ShoppingDraft = z.infer<typeof ShoppingDraftSchema>;
+export type ShoppingDraftGenerateRequest = z.infer<typeof ShoppingDraftGenerateRequestSchema>;
+export type ShoppingDraftPatchItem = z.infer<typeof ShoppingDraftPatchItemSchema>;
+export type ShoppingDraftPatchRequest = z.infer<typeof ShoppingDraftPatchRequestSchema>;
+export type ShoppingDraftResponse = z.infer<typeof ShoppingDraftResponseSchema>;
 export type RecommendationFeedbackRequest = z.infer<typeof RecommendationFeedbackRequestSchema>;
 export type RecommendationFeedbackRecord = z.infer<typeof RecommendationFeedbackRecordSchema>;
 export type RecommendationFeedbackResponse = z.infer<typeof RecommendationFeedbackResponseSchema>;

@@ -612,6 +612,162 @@ describe("home inventory api", () => {
     expect(claimTwoPayload.job).toBeNull();
   });
 
+  it("generates shopping drafts with price intelligence and supports patch/finalize workflow", async () => {
+    const { baseUrl } = await startTestServer();
+
+    const uploadResponse = await fetch(`${baseUrl}/v1/receipts/upload-url`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        householdId: "household_shopping",
+        filename: "shopping-1.jpg",
+        contentType: "image/jpeg",
+      }),
+    });
+    const uploadPayload = (await uploadResponse.json()) as { receiptUploadId: string };
+
+    const enqueueResponse = await fetch(
+      `${baseUrl}/v1/receipts/${uploadPayload.receiptUploadId}/process`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          householdId: "household_shopping",
+          ocrText: "Milk 2L",
+          purchasedAt: "2026-02-08T12:00:00.000Z",
+        }),
+      },
+    );
+    const enqueuePayload = (await enqueueResponse.json()) as { job: { jobId: string } };
+
+    await fetch(`${baseUrl}/internal/jobs/claim`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-home-inventory-worker-token": "test-worker-token",
+      },
+      body: JSON.stringify({}),
+    });
+
+    await fetch(`${baseUrl}/internal/jobs/${enqueuePayload.job.jobId}/result`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-home-inventory-worker-token": "test-worker-token",
+      },
+      body: JSON.stringify({
+        purchasedAt: "2026-02-08T12:00:00.000Z",
+        items: [
+          {
+            itemKey: "milk",
+            rawName: "Whole Milk",
+            normalizedName: "whole milk",
+            quantity: 0.2,
+            unit: "l",
+            category: "dairy",
+            confidence: 0.9,
+            unitPrice: 2.75,
+          },
+        ],
+      }),
+    });
+
+    await fetch(`${baseUrl}/v1/recommendations/household_shopping/weekly/generate`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ weekOf: "2026-02-09" }),
+    });
+
+    const generatedResponse = await fetch(
+      `${baseUrl}/v1/shopping-drafts/household_shopping/generate`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ weekOf: "2026-02-09" }),
+      },
+    );
+    expect(generatedResponse.status).toBe(201);
+    const generatedPayload = (await generatedResponse.json()) as {
+      draft: {
+        draftId: string;
+        items: Array<{ draftItemId: string; quantity: number; priceAlert: boolean }>;
+      };
+    };
+    expect(generatedPayload.draft.items.length).toBeGreaterThan(0);
+    expect(generatedPayload.draft.items.some((item) => typeof item.priceAlert === "boolean")).toBe(
+      true,
+    );
+
+    const firstItem = generatedPayload.draft.items[0];
+    expect(firstItem).toBeDefined();
+    if (!firstItem) {
+      throw new Error("expected shopping draft item");
+    }
+
+    const patchOne = await fetch(
+      `${baseUrl}/v1/shopping-drafts/${generatedPayload.draft.draftId}/items`,
+      {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          householdId: "household_shopping",
+          idempotencyKey: "shopping-patch-1",
+          items: [
+            {
+              draftItemId: firstItem.draftItemId,
+              quantity: firstItem.quantity + 1,
+              notes: "buy extra",
+            },
+          ],
+        }),
+      },
+    );
+    expect(patchOne.status).toBe(200);
+    const patchOnePayload = (await patchOne.json()) as { updated?: boolean };
+    expect(patchOnePayload.updated).toBe(true);
+
+    const patchTwo = await fetch(
+      `${baseUrl}/v1/shopping-drafts/${generatedPayload.draft.draftId}/items`,
+      {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          householdId: "household_shopping",
+          idempotencyKey: "shopping-patch-1",
+          items: [
+            {
+              draftItemId: firstItem.draftItemId,
+              quantity: firstItem.quantity + 1,
+            },
+          ],
+        }),
+      },
+    );
+    expect(patchTwo.status).toBe(200);
+    const patchTwoPayload = (await patchTwo.json()) as { updated?: boolean };
+    expect(patchTwoPayload.updated).toBe(false);
+
+    const finalizeResponse = await fetch(
+      `${baseUrl}/v1/shopping-drafts/${generatedPayload.draft.draftId}/finalize`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+      },
+    );
+    expect(finalizeResponse.status).toBe(200);
+    const finalizePayload = (await finalizeResponse.json()) as {
+      draft: { status: string };
+      updated?: boolean;
+    };
+    expect(finalizePayload.draft.status).toBe("finalized");
+    expect(finalizePayload.updated).toBe(true);
+
+    const latestResponse = await fetch(`${baseUrl}/v1/shopping-drafts/household_shopping/latest`);
+    expect(latestResponse.status).toBe(200);
+    const latestPayload = (await latestResponse.json()) as { draft: { status: string } };
+    expect(latestPayload.draft.status).toBe("finalized");
+  });
+
   it("returns 404 when overriding expiry on unknown lot", async () => {
     const { baseUrl } = await startTestServer();
 

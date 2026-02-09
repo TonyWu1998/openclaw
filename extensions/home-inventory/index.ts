@@ -10,7 +10,7 @@ type HomeInventoryConfig = {
 };
 
 type ApiRequest = {
-  method: "GET" | "POST";
+  method: "GET" | "POST" | "PATCH";
   path: string;
   body?: unknown;
 };
@@ -121,6 +121,95 @@ export default function register(api: OpenClawPluginApi) {
       respond(false, undefined, {
         code: "UNAVAILABLE",
         message: `inventory.plan.weekly failed: ${error instanceof Error ? error.message : String(error)}`,
+      });
+    }
+  });
+
+  api.registerGatewayMethod("inventory.checkin.pending", async ({ params, respond }) => {
+    const householdId = stringParam(params, "householdId") ?? config.defaultHouseholdId;
+    if (!householdId) {
+      respond(false, undefined, {
+        code: "INVALID_REQUEST",
+        message: "householdId is required",
+      });
+      return;
+    }
+
+    try {
+      const payload = await request({
+        method: "GET",
+        path: `/v1/checkins/${encodeURIComponent(householdId)}/pending`,
+      });
+
+      respond(true, payload);
+    } catch (error) {
+      respond(false, undefined, {
+        code: "UNAVAILABLE",
+        message: `inventory.checkin.pending failed: ${error instanceof Error ? error.message : String(error)}`,
+      });
+    }
+  });
+
+  api.registerGatewayMethod("inventory.checkin.submit", async ({ params, respond }) => {
+    const checkinId = stringParam(params, "checkinId");
+    const householdId = stringParam(params, "householdId") ?? config.defaultHouseholdId;
+    const outcome = stringParam(params, "outcome");
+
+    if (!checkinId || !householdId || !outcome) {
+      respond(false, undefined, {
+        code: "INVALID_REQUEST",
+        message: "checkinId, householdId, and outcome are required",
+      });
+      return;
+    }
+
+    try {
+      const payload = await request({
+        method: "POST",
+        path: `/v1/checkins/${encodeURIComponent(checkinId)}/submit`,
+        body: {
+          householdId,
+          outcome,
+          lines: arrayParam(params, "lines"),
+          notes: optionalStringParam(params, "notes"),
+          idempotencyKey: optionalStringParam(params, "idempotencyKey"),
+        },
+      });
+
+      respond(true, payload);
+    } catch (error) {
+      respond(false, undefined, {
+        code: "UNAVAILABLE",
+        message: `inventory.checkin.submit failed: ${error instanceof Error ? error.message : String(error)}`,
+      });
+    }
+  });
+
+  api.registerGatewayMethod("inventory.shopping.generate", async ({ params, respond }) => {
+    const householdId = stringParam(params, "householdId") ?? config.defaultHouseholdId;
+    if (!householdId) {
+      respond(false, undefined, {
+        code: "INVALID_REQUEST",
+        message: "householdId is required",
+      });
+      return;
+    }
+
+    try {
+      const payload = await request({
+        method: "POST",
+        path: `/v1/shopping-drafts/${encodeURIComponent(householdId)}/generate`,
+        body: {
+          weekOf: optionalStringParam(params, "weekOf"),
+          regenerate: booleanParam(params, "regenerate"),
+        },
+      });
+
+      respond(true, payload);
+    } catch (error) {
+      respond(false, undefined, {
+        code: "UNAVAILABLE",
+        message: `inventory.shopping.generate failed: ${error instanceof Error ? error.message : String(error)}`,
       });
     }
   });
@@ -239,7 +328,7 @@ function readConfig(api: OpenClawPluginApi): HomeInventoryConfig {
 
 async function callInventoryApi(params: {
   baseUrl: string;
-  method: "GET" | "POST";
+  method: "GET" | "POST" | "PATCH";
   path: string;
   body?: unknown;
 }): Promise<unknown> {
@@ -249,7 +338,10 @@ async function callInventoryApi(params: {
     headers: {
       "content-type": "application/json",
     },
-    body: params.method === "POST" ? JSON.stringify(params.body ?? {}) : undefined,
+    body:
+      params.method === "POST" || params.method === "PATCH"
+        ? JSON.stringify(params.body ?? {})
+        : undefined,
   });
 
   if (!response.ok) {
@@ -280,6 +372,28 @@ function numberParam(params: Record<string, unknown>, key: string): number | und
     }
   }
   return undefined;
+}
+
+function booleanParam(params: Record<string, unknown>, key: string): boolean | undefined {
+  const value = params[key];
+  if (typeof value === "boolean") {
+    return value;
+  }
+  if (typeof value === "string") {
+    const lowered = value.trim().toLowerCase();
+    if (lowered === "true") {
+      return true;
+    }
+    if (lowered === "false") {
+      return false;
+    }
+  }
+  return undefined;
+}
+
+function arrayParam(params: Record<string, unknown>, key: string): unknown[] | undefined {
+  const value = params[key];
+  return Array.isArray(value) ? value : undefined;
 }
 
 function stringFromValue(value: unknown, fallback: string): string {

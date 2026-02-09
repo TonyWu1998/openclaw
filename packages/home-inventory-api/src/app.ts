@@ -24,6 +24,9 @@ import {
   MealCheckinSubmitResponseSchema,
   RecommendationFeedbackRequestSchema,
   RecommendationFeedbackResponseSchema,
+  ShoppingDraftGenerateRequestSchema,
+  ShoppingDraftPatchRequestSchema,
+  ShoppingDraftResponseSchema,
   ReceiptDetailsResponseSchema,
   ReceiptProcessRequestSchema,
   ReceiptReviewRequestSchema,
@@ -245,6 +248,74 @@ export function createApp(params: CreateAppParams): Express {
     }
 
     res.json(MealCheckinSubmitResponseSchema.parse(response));
+  });
+
+  app.post("/v1/shopping-drafts/:householdId/generate", async (req, res) => {
+    const householdId = parseParam(req.params.householdId, "householdId", res);
+    if (!householdId) {
+      return;
+    }
+
+    const body = parseBody(ShoppingDraftGenerateRequestSchema, req, res);
+    if (!body) {
+      return;
+    }
+
+    const response = await params.store.generateShoppingDraft(householdId, body);
+    res.status(201).json(ShoppingDraftResponseSchema.parse(response));
+  });
+
+  app.get("/v1/shopping-drafts/:householdId/latest", (req, res) => {
+    const householdId = parseParam(req.params.householdId, "householdId", res);
+    if (!householdId) {
+      return;
+    }
+
+    const response = params.store.getLatestShoppingDraft(householdId);
+    if (!response) {
+      res.status(404).json({
+        error: "not_found",
+        message: `shopping draft not found for household: ${householdId}`,
+      });
+      return;
+    }
+
+    res.json(ShoppingDraftResponseSchema.parse(response));
+  });
+
+  app.patch("/v1/shopping-drafts/:draftId/items", (req, res) => {
+    const draftId = parseParam(req.params.draftId, "draftId", res);
+    if (!draftId) {
+      return;
+    }
+
+    const body = parseBody(ShoppingDraftPatchRequestSchema, req, res);
+    if (!body) {
+      return;
+    }
+
+    const response = params.store.patchShoppingDraftItems(draftId, body);
+    if (!response) {
+      res.status(404).json({ error: "not_found", message: `shopping draft not found: ${draftId}` });
+      return;
+    }
+
+    res.json(ShoppingDraftResponseSchema.parse(response));
+  });
+
+  app.post("/v1/shopping-drafts/:draftId/finalize", (req, res) => {
+    const draftId = parseParam(req.params.draftId, "draftId", res);
+    if (!draftId) {
+      return;
+    }
+
+    const response = params.store.finalizeShoppingDraft(draftId);
+    if (!response) {
+      res.status(404).json({ error: "not_found", message: `shopping draft not found: ${draftId}` });
+      return;
+    }
+
+    res.json(ShoppingDraftResponseSchema.parse(response));
   });
 
   app.get("/v1/recommendations/:householdId/daily", (req, res) => {

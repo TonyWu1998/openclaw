@@ -4,6 +4,7 @@ import {
   CompleteJobRequestSchema,
   DailyRecommendationsResponseSchema,
   EnqueueJobResponseSchema,
+  ExpiryRiskResponseSchema,
   FailJobRequestSchema,
   GenerateDailyRecommendationsRequestSchema,
   GenerateWeeklyRecommendationsRequestSchema,
@@ -12,6 +13,8 @@ import {
   JobResultRequestSchema,
   JobResultResponseSchema,
   JobStatusResponseSchema,
+  LotExpiryOverrideRequestSchema,
+  LotExpiryOverrideResponseSchema,
   ManualInventoryEntryRequestSchema,
   ManualInventoryEntryResponseSchema,
   RecommendationFeedbackRequestSchema,
@@ -156,6 +159,45 @@ export function createApp(params: CreateAppParams): Express {
 
     const result = params.store.addManualItems(householdId, body);
     res.status(201).json(ManualInventoryEntryResponseSchema.parse(result));
+  });
+
+  app.post("/v1/inventory/:householdId/lots/:lotId/expiry", (req, res) => {
+    const householdId = parseParam(req.params.householdId, "householdId", res);
+    const lotId = parseParam(req.params.lotId, "lotId", res);
+    if (!householdId || !lotId) {
+      return;
+    }
+
+    const body = parseBody(LotExpiryOverrideRequestSchema, req, res);
+    if (!body) {
+      return;
+    }
+
+    if (body.householdId !== householdId) {
+      res.status(400).json({
+        error: "invalid_request",
+        message: "householdId in body must match householdId path parameter",
+      });
+      return;
+    }
+
+    const result = params.store.overrideLotExpiry(householdId, lotId, body);
+    if (!result) {
+      res.status(404).json({ error: "not_found", message: `lot not found: ${lotId}` });
+      return;
+    }
+
+    res.json(LotExpiryOverrideResponseSchema.parse(result));
+  });
+
+  app.get("/v1/inventory/:householdId/expiry-risk", (req, res) => {
+    const householdId = parseParam(req.params.householdId, "householdId", res);
+    if (!householdId) {
+      return;
+    }
+
+    const response = params.store.getExpiryRisk(householdId);
+    res.json(ExpiryRiskResponseSchema.parse(response));
   });
 
   app.get("/v1/recommendations/:householdId/daily", (req, res) => {

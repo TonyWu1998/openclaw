@@ -339,3 +339,41 @@ describe("InMemoryJobStore phase5a mutations", () => {
     expect(second.inventory.events.filter((event) => event.source === "manual")).toHaveLength(1);
   });
 });
+
+describe("InMemoryJobStore phase5b expiry intelligence", () => {
+  it("applies estimated expiry metadata for newly added lots", () => {
+    const store = new InMemoryJobStore();
+    seedInventory(store, "household_expiry");
+
+    const snapshot = store.getInventory("household_expiry");
+    const proteinLot = snapshot.lots.find((lot) => lot.itemKey === "tomato");
+    expect(proteinLot?.expirySource).toBe("estimated");
+    expect(proteinLot?.expiryEstimatedAt).toBeDefined();
+    expect(proteinLot?.expiresAt).toBeDefined();
+  });
+
+  it("overrides lot expiry with exact source and returns risk entries", () => {
+    const householdId = "household_expiry_override";
+    const store = new InMemoryJobStore();
+    seedInventory(store, householdId);
+
+    const snapshot = store.getInventory(householdId);
+    const lot = snapshot.lots.find((entry) => entry.itemKey === "jasmine-rice");
+    expect(lot).toBeDefined();
+    if (!lot) {
+      throw new Error("expected seeded lot");
+    }
+
+    const overridden = store.overrideLotExpiry(householdId, lot.lotId, {
+      householdId,
+      expiresAt: "2026-02-10T00:00:00.000Z",
+    });
+
+    expect(overridden?.lot.expirySource).toBe("exact");
+    expect(overridden?.lot.expiryConfidence).toBe(1);
+
+    const risk = store.getExpiryRisk(householdId);
+    expect(risk.items.length).toBeGreaterThan(0);
+    expect(risk.items.every((entry) => entry.riskLevel.length > 0)).toBe(true);
+  });
+});

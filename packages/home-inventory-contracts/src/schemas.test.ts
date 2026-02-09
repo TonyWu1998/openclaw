@@ -2,9 +2,12 @@ import { describe, expect, it } from "vitest";
 import {
   ClaimJobResponseSchema,
   DailyRecommendationsResponseSchema,
+  ExpiryRiskResponseSchema,
   JobStatusResponseSchema,
   JobResultRequestSchema,
   JobStatusSchema,
+  LotExpiryOverrideRequestSchema,
+  LotExpiryOverrideResponseSchema,
   ManualInventoryEntryRequestSchema,
   ManualInventoryEntryResponseSchema,
   RecommendationFeedbackRequestSchema,
@@ -261,5 +264,57 @@ describe("home inventory contract schemas", () => {
       },
     });
     expect(response.inventory.events[0]?.source).toBe("manual");
+  });
+
+  it("validates lot expiry override payloads", () => {
+    const request = LotExpiryOverrideRequestSchema.parse({
+      householdId: "household_1",
+      expiresAt: "2026-02-20T00:00:00.000Z",
+      notes: "label scan",
+    });
+    expect(request.householdId).toBe("household_1");
+
+    const response = LotExpiryOverrideResponseSchema.parse({
+      lot: {
+        lotId: "lot_1",
+        householdId: "household_1",
+        itemKey: "milk",
+        itemName: "whole milk",
+        quantityRemaining: 1,
+        unit: "l",
+        category: "dairy",
+        purchasedAt: "2026-02-08T12:00:00.000Z",
+        expiresAt: "2026-02-20T00:00:00.000Z",
+        expiryEstimatedAt: "2026-02-18T00:00:00.000Z",
+        expirySource: "exact",
+        expiryConfidence: 1,
+        updatedAt: "2026-02-09T12:00:00.000Z",
+      },
+      eventsCreated: 0,
+    });
+    expect(response.lot.expirySource).toBe("exact");
+  });
+
+  it("validates expiry risk response payload", () => {
+    const parsed = ExpiryRiskResponseSchema.parse({
+      householdId: "household_1",
+      asOf: "2026-02-09T12:00:00.000Z",
+      items: [
+        {
+          lotId: "lot_1",
+          itemKey: "chicken",
+          itemName: "chicken breast",
+          category: "protein",
+          quantityRemaining: 2,
+          unit: "lb",
+          expiresAt: "2026-02-10T12:00:00.000Z",
+          expirySource: "estimated",
+          expiryConfidence: 0.65,
+          daysRemaining: 1,
+          riskLevel: "critical",
+        },
+      ],
+    });
+    expect(parsed.items[0]?.riskLevel).toBe("critical");
   });
 });

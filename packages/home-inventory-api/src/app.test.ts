@@ -258,6 +258,41 @@ describe("home inventory api", () => {
     expect(inventoryPayload.events.some((event) => event.source === "receipt_review")).toBe(true);
     expect(inventoryPayload.events.some((event) => event.source === "manual")).toBe(true);
 
+    const manualLot = inventoryPayload.lots.find((lot) => lot.itemKey === "paper-towel");
+    expect(manualLot).toBeDefined();
+
+    const overrideResponse = await fetch(
+      `${baseUrl}/v1/inventory/household_main/lots/${manualLot?.lotId}/expiry`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          householdId: "household_main",
+          expiresAt: "2026-12-31T00:00:00.000Z",
+        }),
+      },
+    );
+    expect(overrideResponse.status).toBe(200);
+    const overridePayload = (await overrideResponse.json()) as {
+      lot: { expirySource?: string; expiresAt?: string };
+    };
+    expect(overridePayload.lot.expirySource).toBe("exact");
+    expect(overridePayload.lot.expiresAt).toBe("2026-12-31T00:00:00.000Z");
+
+    const expiryRiskResponse = await fetch(`${baseUrl}/v1/inventory/household_main/expiry-risk`);
+    expect(expiryRiskResponse.status).toBe(200);
+    const expiryRiskPayload = (await expiryRiskResponse.json()) as {
+      householdId: string;
+      items: Array<{ riskLevel: string }>;
+    };
+    expect(expiryRiskPayload.householdId).toBe("household_main");
+    expect(expiryRiskPayload.items.length).toBeGreaterThan(0);
+    expect(
+      expiryRiskPayload.items.every((item) =>
+        ["critical", "high", "medium", "low"].includes(item.riskLevel),
+      ),
+    ).toBe(true);
+
     const dailyGenerateResponse = await fetch(
       `${baseUrl}/v1/recommendations/household_main/daily/generate`,
       {
@@ -452,6 +487,21 @@ describe("home inventory api", () => {
     };
     expect(manualPayloadTwo.applied).toBe(false);
     expect(manualPayloadTwo.eventsCreated).toBe(0);
+  });
+
+  it("returns 404 when overriding expiry on unknown lot", async () => {
+    const { baseUrl } = await startTestServer();
+
+    const response = await fetch(`${baseUrl}/v1/inventory/household_main/lots/lot_missing/expiry`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        householdId: "household_main",
+        expiresAt: "2026-03-01T00:00:00.000Z",
+      }),
+    });
+
+    expect(response.status).toBe(404);
   });
 
   it("rejects internal worker actions without correct token", async () => {

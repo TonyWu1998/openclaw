@@ -3,10 +3,12 @@ import type { AddressInfo } from "node:net";
 import {
   DailyRecommendationsResponseSchema,
   EnqueueJobResponseSchema,
+  ExpiryRiskResponseSchema,
   HealthResponseSchema,
   InventorySnapshotResponseSchema,
   JobResultResponseSchema,
   JobStatusResponseSchema,
+  LotExpiryOverrideResponseSchema,
   ManualInventoryEntryResponseSchema,
   ReceiptDetailsResponseSchema,
   ReceiptReviewResponseSchema,
@@ -230,6 +232,32 @@ describe("home inventory API public contracts", () => {
     expect(inventoryPayload.householdId).toBe("household_contract");
     expect(inventoryPayload.events.some((event) => event.source === "receipt_review")).toBe(true);
     expect(inventoryPayload.events.some((event) => event.source === "manual")).toBe(true);
+
+    const dishSoapLot = inventoryPayload.lots.find((lot) => lot.itemKey === "dish-soap");
+    expect(dishSoapLot).toBeDefined();
+
+    const expiryOverrideResponse = await fetch(
+      `${baseUrl}/v1/inventory/household_contract/lots/${dishSoapLot?.lotId}/expiry`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          householdId: "household_contract",
+          expiresAt: "2026-03-01T00:00:00.000Z",
+          notes: "manual override",
+        }),
+      },
+    );
+    const expiryOverridePayload = LotExpiryOverrideResponseSchema.parse(
+      await expiryOverrideResponse.json(),
+    );
+    expect(expiryOverridePayload.lot.expirySource).toBe("exact");
+
+    const expiryRiskResponse = await fetch(
+      `${baseUrl}/v1/inventory/household_contract/expiry-risk`,
+    );
+    const expiryRiskPayload = ExpiryRiskResponseSchema.parse(await expiryRiskResponse.json());
+    expect(expiryRiskPayload.items.length).toBeGreaterThan(0);
 
     const dailyGenerateResponse = await fetch(
       `${baseUrl}/v1/recommendations/household_contract/daily/generate`,

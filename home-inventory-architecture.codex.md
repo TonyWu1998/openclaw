@@ -14,6 +14,8 @@ Last updated: 2026-02-09
 - [x] Phase 5B completed and merged (`PR #8`, merge `d4bb4c97e57dd41f00383da0e34ee4923e94a552`): expiry estimation + risk APIs.
 - [x] Phase 5C completed and merged (`PR #9`, merge `20424ae3d6d0e8f2943d13f37f76f61c1f1e0c1d`): meal check-ins + stock mutation.
 - [x] Phase 5D completed and merged (`PR #10`, merge `742440482a0e1851040a5209ca33c8b7e0fd228f`): batch ingestion + image preprocessing.
+- [x] Phase 5E completed and merged (`PR #11`, merge `d5735de88714c22799b23e4c4b560c1a6e29f580`): shopping drafts + price intelligence.
+- [x] Phase 5F completed and merged (`PR #12`, merge `7d945de3865869e4670010f09938afc2e4a3095c`): pantry health score + history APIs.
 
 ## Phase 5 Execution Log
 
@@ -81,6 +83,43 @@ Last updated: 2026-02-09
   - `npm test` (in `packages/home-inventory-contracts`)
   - `npm test` (in `packages/home-inventory-api`)
   - `npm test` (in `packages/home-inventory-worker`)
+  - `npx -y pnpm@10.23.0 build`
+  - `npx -y pnpm@10.23.0 check`
+
+### Phase 5E: Shopping Drafts + Price Intelligence
+
+- Branch: `codex/home-inventory-phase5e-shopping-drafts-price-intel`
+- PR: https://github.com/TonyWu1998/openclaw/pull/11
+- Merge commit: `d5735de88714c22799b23e4c4b560c1a6e29f580`
+- Added endpoints:
+  - `POST /v1/shopping-drafts/:householdId/generate`
+  - `GET /v1/shopping-drafts/:householdId/latest`
+  - `PATCH /v1/shopping-drafts/:draftId/items`
+  - `POST /v1/shopping-drafts/:draftId/finalize`
+- Added migration:
+  - `packages/home-inventory-api/sql/migrations/20260209_0008_phase5e_shopping_drafts.sql`
+- Validation commands run:
+  - `npm test` (in `packages/home-inventory-contracts`)
+  - `npm test` (in `packages/home-inventory-api`)
+  - `npm test` (in `packages/home-inventory-worker`)
+  - `npx -y pnpm@10.23.0 build`
+  - `npx -y pnpm@10.23.0 check`
+
+### Phase 5F: Pantry Health Score
+
+- Branch: `codex/home-inventory-phase5f-pantry-health-score`
+- PR: https://github.com/TonyWu1998/openclaw/pull/12
+- Merge commit: `7d945de3865869e4670010f09938afc2e4a3095c`
+- Added endpoints:
+  - `GET /v1/pantry-health/:householdId`
+  - `GET /v1/pantry-health/:householdId/history`
+- Added migration:
+  - `packages/home-inventory-api/sql/migrations/20260209_0009_phase5f_health_score.sql`
+- Validation commands run:
+  - `npx -y pnpm@10.23.0 --filter @openclaw/home-inventory-contracts test`
+  - `npx -y pnpm@10.23.0 --filter @openclaw/home-inventory-api test`
+  - `npx -y pnpm@10.23.0 --filter @openclaw/home-inventory-worker test`
+  - `npx -y pnpm@10.23.0 exec vitest run extensions/home-inventory/index.test.ts`
   - `npx -y pnpm@10.23.0 build`
   - `npx -y pnpm@10.23.0 check`
 

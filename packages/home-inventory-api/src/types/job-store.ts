@@ -5,11 +5,15 @@ import type {
   GenerateWeeklyRecommendationsRequest,
   InventorySnapshotResponse,
   JobResultRequest,
+  ManualInventoryEntryRequest,
+  ManualInventoryEntryResponse,
   RecommendationFeedbackRecord,
   RecommendationFeedbackRequest,
   ReceiptDetailsResponse,
   ReceiptProcessJob,
   ReceiptProcessRequest,
+  ReceiptReviewRequest,
+  ReceiptReviewResponse,
   ReceiptUploadRequest,
   ReceiptUploadResponse,
   WeeklyRecommendationsResponse,
@@ -24,6 +28,10 @@ export type ReceiptJobStore = {
   }) => ReceiptProcessJob;
   getJob: (jobId: string) => ReceiptProcessJob | null;
   getReceipt: (receiptUploadId: string) => ReceiptDetailsResponse | null;
+  reviewReceipt: (
+    receiptUploadId: string,
+    request: ReceiptReviewRequest,
+  ) => ReceiptReviewResponse | null;
   claimNextJob: () => ClaimedJob | null;
   submitJobResult: (
     jobId: string,
@@ -35,6 +43,10 @@ export type ReceiptJobStore = {
   completeJob: (jobId: string, notes?: string) => ReceiptProcessJob | null;
   failJob: (jobId: string, error: string) => ReceiptProcessJob | null;
   getInventory: (householdId: string) => InventorySnapshotResponse;
+  addManualItems: (
+    householdId: string,
+    request: ManualInventoryEntryRequest,
+  ) => ManualInventoryEntryResponse;
   generateDailyRecommendations: (
     householdId: string,
     request: GenerateDailyRecommendationsRequest,

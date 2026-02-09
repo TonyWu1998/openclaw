@@ -7,7 +7,9 @@ import {
   InventorySnapshotResponseSchema,
   JobResultResponseSchema,
   JobStatusResponseSchema,
+  ManualInventoryEntryResponseSchema,
   ReceiptDetailsResponseSchema,
+  ReceiptReviewResponseSchema,
   ReceiptUploadResponseSchema,
   RecommendationFeedbackResponseSchema,
   WeeklyRecommendationsResponseSchema,
@@ -169,9 +171,65 @@ describe("home inventory API public contracts", () => {
     expect(receiptPayload.receipt.status).toBe("parsed");
     expect(receiptPayload.receipt.receiptImageDataUrl?.startsWith("data:image/")).toBe(true);
 
+    const reviewResponse = await fetch(
+      `${baseUrl}/v1/receipts/${uploadPayload.receiptUploadId}/review`,
+      {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          householdId: "household_contract",
+          mode: "append",
+          idempotencyKey: "review-contract-1",
+          items: [
+            {
+              itemKey: "egg",
+              rawName: "Eggs",
+              normalizedName: "egg",
+              quantity: 6,
+              unit: "count",
+              category: "protein",
+              confidence: 0.9,
+            },
+          ],
+        }),
+      },
+    );
+    const reviewPayload = ReceiptReviewResponseSchema.parse(await reviewResponse.json());
+    expect(reviewPayload.applied).toBe(true);
+    expect(reviewPayload.eventsCreated).toBeGreaterThan(0);
+
+    const manualEntryResponse = await fetch(
+      `${baseUrl}/v1/inventory/household_contract/manual-items`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          idempotencyKey: "manual-contract-1",
+          items: [
+            {
+              itemKey: "dish-soap",
+              rawName: "Dish Soap",
+              normalizedName: "dish soap",
+              quantity: 1,
+              unit: "bottle",
+              category: "household",
+              confidence: 1,
+            },
+          ],
+          notes: "manual add",
+        }),
+      },
+    );
+    const manualPayload = ManualInventoryEntryResponseSchema.parse(
+      await manualEntryResponse.json(),
+    );
+    expect(manualPayload.applied).toBe(true);
+
     const inventoryResponse = await fetch(`${baseUrl}/v1/inventory/household_contract`);
     const inventoryPayload = InventorySnapshotResponseSchema.parse(await inventoryResponse.json());
     expect(inventoryPayload.householdId).toBe("household_contract");
+    expect(inventoryPayload.events.some((event) => event.source === "receipt_review")).toBe(true);
+    expect(inventoryPayload.events.some((event) => event.source === "manual")).toBe(true);
 
     const dailyGenerateResponse = await fetch(
       `${baseUrl}/v1/recommendations/household_contract/daily/generate`,

@@ -2,8 +2,8 @@
   "name": "@openclaw/home-inventory-api",
   "version": "0.1.0",
   "private": true,
-  "type": "module",
   "description": "Phase 1 backend API skeleton for the home inventory app",
+  "type": "module",
   "exports": {
     ".": "./src/index.ts"
   },

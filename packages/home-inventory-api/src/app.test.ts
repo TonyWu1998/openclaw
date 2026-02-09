@@ -194,21 +194,69 @@ describe("home inventory api", () => {
     expect(receiptPayload.receipt.items?.length).toBe(2);
     expect(receiptPayload.receipt.merchantName).toBe("Fresh Market");
 
+    const reviewResponse = await fetch(
+      `${baseUrl}/v1/receipts/${uploadPayload.receiptUploadId}/review`,
+      {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          householdId: "household_main",
+          mode: "append",
+          idempotencyKey: "review-main-1",
+          items: [
+            {
+              itemKey: "egg",
+              rawName: "Eggs",
+              normalizedName: "egg",
+              quantity: 6,
+              unit: "count",
+              category: "protein",
+              confidence: 0.88,
+            },
+          ],
+        }),
+      },
+    );
+    expect(reviewResponse.status).toBe(200);
+
+    const manualResponse = await fetch(`${baseUrl}/v1/inventory/household_main/manual-items`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        idempotencyKey: "manual-main-1",
+        items: [
+          {
+            itemKey: "paper-towel",
+            rawName: "Paper Towel",
+            normalizedName: "paper towel",
+            quantity: 2,
+            unit: "count",
+            category: "household",
+            confidence: 1,
+          },
+        ],
+        notes: "manual add",
+      }),
+    });
+    expect(manualResponse.status).toBe(201);
+
     const inventoryResponse = await fetch(`${baseUrl}/v1/inventory/household_main`);
     expect(inventoryResponse.status).toBe(200);
     const inventoryPayload = (await inventoryResponse.json()) as {
       householdId: string;
       lots: Array<{ itemKey: string; quantityRemaining: number }>;
-      events: Array<{ eventType: string }>;
+      events: Array<{ eventType: string; source: string }>;
     };
 
     expect(inventoryPayload.householdId).toBe("household_main");
-    expect(inventoryPayload.lots).toHaveLength(2);
+    expect(inventoryPayload.lots).toHaveLength(4);
     expect(
       inventoryPayload.lots.find((lot) => lot.itemKey === "jasmine-rice")?.quantityRemaining,
     ).toBe(2);
-    expect(inventoryPayload.events).toHaveLength(2);
-    expect(inventoryPayload.events.every((event) => event.eventType === "add")).toBe(true);
+    expect(inventoryPayload.events).toHaveLength(4);
+    expect(inventoryPayload.events.filter((event) => event.eventType === "add")).toHaveLength(4);
+    expect(inventoryPayload.events.some((event) => event.source === "receipt_review")).toBe(true);
+    expect(inventoryPayload.events.some((event) => event.source === "manual")).toBe(true);
 
     const dailyGenerateResponse = await fetch(
       `${baseUrl}/v1/recommendations/household_main/daily/generate`,
@@ -260,6 +308,150 @@ describe("home inventory api", () => {
       recommendations: Array<{ itemKey: string }>;
     };
     expect(weeklyPayload.run.runType).toBe("weekly");
+  });
+
+  it("keeps review and manual entry idempotent when idempotency key is reused", async () => {
+    const { baseUrl } = await startTestServer();
+
+    const uploadResponse = await fetch(`${baseUrl}/v1/receipts/upload-url`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        householdId: "household_idempotency",
+        filename: "receipt-idempotent.jpg",
+        contentType: "image/jpeg",
+      }),
+    });
+    const uploadPayload = (await uploadResponse.json()) as { receiptUploadId: string };
+
+    const enqueueResponse = await fetch(
+      `${baseUrl}/v1/receipts/${uploadPayload.receiptUploadId}/process`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          householdId: "household_idempotency",
+          ocrText: "Milk 1L",
+        }),
+      },
+    );
+    const enqueuePayload = (await enqueueResponse.json()) as { job: { jobId: string } };
+
+    await fetch(`${baseUrl}/internal/jobs/claim`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-home-inventory-worker-token": "test-worker-token",
+      },
+      body: JSON.stringify({}),
+    });
+
+    await fetch(`${baseUrl}/internal/jobs/${enqueuePayload.job.jobId}/result`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-home-inventory-worker-token": "test-worker-token",
+      },
+      body: JSON.stringify({
+        items: [
+          {
+            itemKey: "milk",
+            rawName: "Whole Milk",
+            normalizedName: "whole milk",
+            quantity: 1,
+            unit: "l",
+            category: "dairy",
+            confidence: 0.9,
+          },
+        ],
+      }),
+    });
+
+    const reviewBody = JSON.stringify({
+      householdId: "household_idempotency",
+      mode: "overwrite",
+      idempotencyKey: "review-repeat-1",
+      items: [
+        {
+          itemKey: "milk",
+          rawName: "Whole Milk",
+          normalizedName: "whole milk",
+          quantity: 2,
+          unit: "l",
+          category: "dairy",
+          confidence: 0.9,
+        },
+      ],
+    });
+
+    const reviewOne = await fetch(
+      `${baseUrl}/v1/receipts/${uploadPayload.receiptUploadId}/review`,
+      {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: reviewBody,
+      },
+    );
+    const reviewPayloadOne = (await reviewOne.json()) as {
+      eventsCreated: number;
+      applied: boolean;
+    };
+    expect(reviewPayloadOne.applied).toBe(true);
+    expect(reviewPayloadOne.eventsCreated).toBe(1);
+
+    const reviewTwo = await fetch(
+      `${baseUrl}/v1/receipts/${uploadPayload.receiptUploadId}/review`,
+      {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: reviewBody,
+      },
+    );
+    const reviewPayloadTwo = (await reviewTwo.json()) as {
+      eventsCreated: number;
+      applied: boolean;
+    };
+    expect(reviewPayloadTwo.applied).toBe(false);
+    expect(reviewPayloadTwo.eventsCreated).toBe(0);
+
+    const manualBody = JSON.stringify({
+      idempotencyKey: "manual-repeat-1",
+      items: [
+        {
+          itemKey: "dish-soap",
+          rawName: "Dish Soap",
+          normalizedName: "dish soap",
+          quantity: 1,
+          unit: "bottle",
+          category: "household",
+          confidence: 1,
+        },
+      ],
+    });
+
+    const manualOne = await fetch(`${baseUrl}/v1/inventory/household_idempotency/manual-items`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: manualBody,
+    });
+    const manualPayloadOne = (await manualOne.json()) as {
+      applied: boolean;
+      eventsCreated: number;
+    };
+    expect(manualPayloadOne.applied).toBe(true);
+    expect(manualPayloadOne.eventsCreated).toBe(1);
+
+    const manualTwo = await fetch(`${baseUrl}/v1/inventory/household_idempotency/manual-items`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: manualBody,
+    });
+    const manualPayloadTwo = (await manualTwo.json()) as {
+      applied: boolean;
+      eventsCreated: number;
+    };
+    expect(manualPayloadTwo.applied).toBe(false);
+    expect(manualPayloadTwo.eventsCreated).toBe(0);
   });
 
   it("rejects internal worker actions without correct token", async () => {

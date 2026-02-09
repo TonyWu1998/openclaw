@@ -1,11 +1,7 @@
 import type { Request, Response } from "express";
 import type { ZodType } from "zod";
 
-export function parseBody<T>(
-  schema: ZodType<T>,
-  req: Request,
-  res: Response,
-): T | null {
+export function parseBody<T>(schema: ZodType<T>, req: Request, res: Response): T | null {
   const result = schema.safeParse(req.body);
   if (!result.success) {
     res.status(400).json({
@@ -17,11 +13,7 @@ export function parseBody<T>(
   return result.data;
 }
 
-export function parseParam(
-  value: string | undefined,
-  field: string,
-  res: Response,
-): string | null {
+export function parseParam(value: string | undefined, field: string, res: Response): string | null {
   if (!value || value.length === 0) {
     res.status(400).json({ error: "invalid_request", message: `missing path parameter: ${field}` });
     return null;

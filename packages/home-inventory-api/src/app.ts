@@ -1,5 +1,7 @@
 import type { Express } from "express";
 import {
+  BatchReceiptProcessRequestSchema,
+  BatchReceiptProcessResponseSchema,
   ClaimJobResponseSchema,
   CompleteJobRequestSchema,
   DailyRecommendationsResponseSchema,
@@ -43,7 +45,8 @@ type CreateAppParams = {
 
 export function createApp(params: CreateAppParams): Express {
   const app = express();
-  app.use(express.json({ limit: "2mb" }));
+  // Batch receipt process can carry multiple inline image payloads.
+  app.use(express.json({ limit: "40mb" }));
 
   app.get("/health", (_req, res) => {
     const payload: HealthResponse = {
@@ -101,6 +104,17 @@ export function createApp(params: CreateAppParams): Express {
     }
 
     res.json(ReceiptReviewResponseSchema.parse(reviewed));
+  });
+
+  app.post("/v1/receipts/batch/process", (req, res) => {
+    const body = parseBody(BatchReceiptProcessRequestSchema, req, res);
+    if (!body) {
+      return;
+    }
+
+    const response = params.store.enqueueBatchJobs(body);
+    const status = response.accepted > 0 ? 202 : 400;
+    res.status(status).json(BatchReceiptProcessResponseSchema.parse(response));
   });
 
   app.post("/v1/receipts/:receiptUploadId/process", (req, res) => {

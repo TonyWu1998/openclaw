@@ -520,6 +520,98 @@ describe("home inventory api", () => {
     expect(manualPayloadTwo.eventsCreated).toBe(0);
   });
 
+  it("supports batch receipt enqueue with per-item errors and idempotent retries", async () => {
+    const { baseUrl } = await startTestServer();
+
+    const uploadResponse = await fetch(`${baseUrl}/v1/receipts/upload-url`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        householdId: "household_batch_api",
+        filename: "batch-api.jpg",
+        contentType: "image/jpeg",
+      }),
+    });
+    const uploadPayload = (await uploadResponse.json()) as { receiptUploadId: string };
+
+    const batchOneResponse = await fetch(`${baseUrl}/v1/receipts/batch/process`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        receipts: [
+          {
+            receiptUploadId: uploadPayload.receiptUploadId,
+            householdId: "household_batch_api",
+            ocrText: "Apple x4",
+            idempotencyKey: "batch-api-key-1",
+          },
+          {
+            receiptUploadId: "receipt_missing",
+            householdId: "household_batch_api",
+            ocrText: "Milk 1L",
+          },
+        ],
+      }),
+    });
+    expect(batchOneResponse.status).toBe(202);
+    const batchOnePayload = (await batchOneResponse.json()) as {
+      accepted: number;
+      rejected: number;
+      results: Array<{ accepted: boolean; job?: { jobId: string } }>;
+    };
+    expect(batchOnePayload.accepted).toBe(1);
+    expect(batchOnePayload.rejected).toBe(1);
+
+    const firstJobId = batchOnePayload.results.find((result) => result.accepted)?.job?.jobId;
+    expect(firstJobId).toBeDefined();
+
+    const batchTwoResponse = await fetch(`${baseUrl}/v1/receipts/batch/process`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        receipts: [
+          {
+            receiptUploadId: uploadPayload.receiptUploadId,
+            householdId: "household_batch_api",
+            ocrText: "Apple x4",
+            idempotencyKey: "batch-api-key-1",
+          },
+        ],
+      }),
+    });
+    expect(batchTwoResponse.status).toBe(202);
+    const batchTwoPayload = (await batchTwoResponse.json()) as {
+      accepted: number;
+      results: Array<{ job?: { jobId: string } }>;
+    };
+    expect(batchTwoPayload.accepted).toBe(1);
+    expect(batchTwoPayload.results[0]?.job?.jobId).toBe(firstJobId);
+
+    const claimOne = await fetch(`${baseUrl}/internal/jobs/claim`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-home-inventory-worker-token": "test-worker-token",
+      },
+      body: JSON.stringify({}),
+    });
+    const claimOnePayload = (await claimOne.json()) as {
+      job: { job?: { jobId: string } } | null;
+    };
+    expect(claimOnePayload.job?.job?.jobId).toBe(firstJobId);
+
+    const claimTwo = await fetch(`${baseUrl}/internal/jobs/claim`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-home-inventory-worker-token": "test-worker-token",
+      },
+      body: JSON.stringify({}),
+    });
+    const claimTwoPayload = (await claimTwo.json()) as { job: null | object };
+    expect(claimTwoPayload.job).toBeNull();
+  });
+
   it("returns 404 when overriding expiry on unknown lot", async () => {
     const { baseUrl } = await startTestServer();
 

@@ -1,6 +1,7 @@
 import type { JobResultRequest, ReceiptItem } from "@openclaw/home-inventory-contracts";
 import type { AddressInfo } from "node:net";
 import {
+  BatchReceiptProcessResponseSchema,
   DailyRecommendationsResponseSchema,
   EnqueueJobResponseSchema,
   ExpiryRiskResponseSchema,
@@ -351,5 +352,61 @@ describe("home inventory API public contracts", () => {
     );
     const weeklyRead = WeeklyRecommendationsResponseSchema.parse(await weeklyReadResponse.json());
     expect(weeklyRead.run.runType).toBe("weekly");
+  });
+
+  it("validates batch receipt process endpoint contract with partial failures", async () => {
+    const { baseUrl } = await startServer();
+
+    const uploadOne = await fetch(`${baseUrl}/v1/receipts/upload-url`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        householdId: "household_batch_contract",
+        filename: "batch-contract-1.jpg",
+        contentType: "image/jpeg",
+      }),
+    });
+    const uploadOnePayload = ReceiptUploadResponseSchema.parse(await uploadOne.json());
+
+    const uploadTwo = await fetch(`${baseUrl}/v1/receipts/upload-url`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        householdId: "household_batch_contract",
+        filename: "batch-contract-2.jpg",
+        contentType: "image/jpeg",
+      }),
+    });
+    const uploadTwoPayload = ReceiptUploadResponseSchema.parse(await uploadTwo.json());
+
+    const batchResponse = await fetch(`${baseUrl}/v1/receipts/batch/process`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        receipts: [
+          {
+            receiptUploadId: uploadOnePayload.receiptUploadId,
+            householdId: "household_batch_contract",
+            ocrText: "Banana x6",
+          },
+          {
+            receiptUploadId: "receipt_does_not_exist",
+            householdId: "household_batch_contract",
+            ocrText: "Yogurt x2",
+          },
+          {
+            receiptUploadId: uploadTwoPayload.receiptUploadId,
+            householdId: "household_batch_contract",
+          },
+        ],
+      }),
+    });
+
+    expect(batchResponse.status).toBe(202);
+    const batchPayload = BatchReceiptProcessResponseSchema.parse(await batchResponse.json());
+    expect(batchPayload.requested).toBe(3);
+    expect(batchPayload.accepted).toBe(1);
+    expect(batchPayload.rejected).toBe(2);
+    expect(batchPayload.results.filter((entry) => entry.accepted)).toHaveLength(1);
   });
 });

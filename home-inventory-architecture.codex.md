@@ -12,6 +12,7 @@ Last updated: 2026-02-09
 - [x] Phase 4.5 completed: vision-ready receipt ingestion input and live LM Studio end-to-end validation (upload -> extract/persist -> recommend -> inventory update).
 - [x] Phase 5A completed and merged (`PR #7`, merge `e2bdaa0346d0d67028933ffbed44b4702f8c5c06`): receipt review + manual inventory entry.
 - [x] Phase 5B completed and merged (`PR #8`, merge `d4bb4c97e57dd41f00383da0e34ee4923e94a552`): expiry estimation + risk APIs.
+- [x] Phase 5C completed and merged (`PR #9`, merge `20424ae3d6d0e8f2943d13f37f76f61c1f1e0c1d`): meal check-ins + stock mutation.
 
 ## Phase 5 Execution Log
 
@@ -42,6 +43,23 @@ Last updated: 2026-02-09
   - `GET /v1/inventory/:householdId/expiry-risk`
 - Added migration:
   - `packages/home-inventory-api/sql/migrations/20260209_0005_phase5b_expiry.sql`
+- Validation commands run:
+  - `npm test` (in `packages/home-inventory-contracts`)
+  - `npm test` (in `packages/home-inventory-api`)
+  - `npm test` (in `packages/home-inventory-worker`)
+  - `npx -y pnpm@10.23.0 build`
+  - `npx -y pnpm@10.23.0 check`
+
+### Phase 5C: Meal Check-ins + Inventory Consumption
+
+- Branch: `codex/home-inventory-phase5c-meal-checkins-consumption`
+- PR: https://github.com/TonyWu1998/openclaw/pull/9
+- Merge commit: `20424ae3d6d0e8f2943d13f37f76f61c1f1e0c1d`
+- Added endpoints:
+  - `GET /v1/checkins/:householdId/pending`
+  - `POST /v1/checkins/:checkinId/submit`
+- Added migration:
+  - `packages/home-inventory-api/sql/migrations/20260209_0006_phase5c_checkins.sql`
 - Validation commands run:
   - `npm test` (in `packages/home-inventory-contracts`)
   - `npm test` (in `packages/home-inventory-api`)

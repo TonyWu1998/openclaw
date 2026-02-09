@@ -13,6 +13,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@openclaw/home-inventory-contracts": "workspace:*"
+    "@openclaw/home-inventory-contracts": "workspace:*",
+    "sharp": "^0.34.5"
   }
 }

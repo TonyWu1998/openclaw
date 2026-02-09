@@ -104,6 +104,15 @@ export const ReceiptProcessRequestSchema = z.object({
   purchasedAt: z.iso.datetime().optional(),
 });
 
+export const BatchReceiptProcessEntrySchema = ReceiptProcessRequestSchema.extend({
+  receiptUploadId: IdSchema,
+  idempotencyKey: z.string().min(1).max(128).optional(),
+});
+
+export const BatchReceiptProcessRequestSchema = z.object({
+  receipts: z.array(BatchReceiptProcessEntrySchema).min(1).max(10),
+});
+
 export const ReceiptProcessJobSchema = z.object({
   jobId: IdSchema,
   receiptUploadId: IdSchema,
@@ -123,6 +132,22 @@ export const ClaimedJobSchema = z.object({
 
 export const EnqueueJobResponseSchema = z.object({
   job: ReceiptProcessJobSchema,
+});
+
+export const BatchReceiptProcessResultSchema = z.object({
+  receiptUploadId: IdSchema,
+  householdId: IdSchema,
+  accepted: z.boolean(),
+  job: ReceiptProcessJobSchema.optional(),
+  error: z.string().min(1).max(500).optional(),
+});
+
+export const BatchReceiptProcessResponseSchema = z.object({
+  batchId: IdSchema,
+  requested: z.number().int().min(1).max(10),
+  accepted: z.number().int().min(0).max(10),
+  rejected: z.number().int().min(0).max(10),
+  results: z.array(BatchReceiptProcessResultSchema),
 });
 
 export const ClaimJobResponseSchema = z.object({
@@ -383,9 +408,13 @@ export type ReceiptReviewMode = z.infer<typeof ReceiptReviewModeSchema>;
 export type ReceiptReviewRequest = z.infer<typeof ReceiptReviewRequestSchema>;
 export type ReceiptReviewResponse = z.infer<typeof ReceiptReviewResponseSchema>;
 export type ReceiptProcessRequest = z.infer<typeof ReceiptProcessRequestSchema>;
+export type BatchReceiptProcessEntry = z.infer<typeof BatchReceiptProcessEntrySchema>;
+export type BatchReceiptProcessRequest = z.infer<typeof BatchReceiptProcessRequestSchema>;
 export type ReceiptProcessJob = z.infer<typeof ReceiptProcessJobSchema>;
 export type ClaimedJob = z.infer<typeof ClaimedJobSchema>;
 export type EnqueueJobResponse = z.infer<typeof EnqueueJobResponseSchema>;
+export type BatchReceiptProcessResult = z.infer<typeof BatchReceiptProcessResultSchema>;
+export type BatchReceiptProcessResponse = z.infer<typeof BatchReceiptProcessResponseSchema>;
 export type ClaimJobResponse = z.infer<typeof ClaimJobResponseSchema>;
 export type JobStatusResponse = z.infer<typeof JobStatusResponseSchema>;
 export type JobResultRequest = z.infer<typeof JobResultRequestSchema>;

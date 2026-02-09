@@ -108,6 +108,30 @@ describe("PhaseTwoReceiptProcessor", () => {
     expect(result.items[0]?.itemKey).toBe("olive-oil");
   });
 
+  it("passes preprocessed image data to extractor when available", async () => {
+    let extractedImageDataUrl: string | undefined;
+    const extractor: ReceiptExtractor = {
+      extract: async (input) => {
+        extractedImageDataUrl = input.receiptImageDataUrl;
+        return [{ rawName: "Olive Oil", quantity: 1, unit: "bottle" }];
+      },
+    };
+
+    const processor = new PhaseTwoReceiptProcessor({
+      primaryExtractor: extractor,
+      fallbackExtractor: extractor,
+      imagePreprocessor: {
+        preprocess: async () => "data:image/jpeg;base64,processed",
+      },
+    });
+
+    const job = claimedJob("");
+    job.receipt.receiptImageDataUrl = "data:image/png;base64,original";
+
+    await processor.process(job);
+    expect(extractedImageDataUrl).toBe("data:image/jpeg;base64,processed");
+  });
+
   it("resolves OpenRouter config from env with OpenRouter headers", () => {
     const config = resolveReceiptLlmConfigFromEnv({
       HOME_INVENTORY_LLM_PROVIDER: "openrouter",

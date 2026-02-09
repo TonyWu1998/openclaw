@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  BatchReceiptProcessRequestSchema,
+  BatchReceiptProcessResponseSchema,
   ClaimJobResponseSchema,
   DailyRecommendationsResponseSchema,
   ExpiryRiskResponseSchema,
@@ -95,6 +97,64 @@ describe("home inventory contract schemas", () => {
     });
 
     expect(parsed.receiptImageDataUrl?.startsWith("data:image/")).toBe(true);
+  });
+
+  it("validates batch receipt process request and response payloads", () => {
+    const request = BatchReceiptProcessRequestSchema.parse({
+      receipts: [
+        {
+          receiptUploadId: "receipt_1",
+          householdId: "household_1",
+          ocrText: "Rice 2kg",
+          idempotencyKey: "batch-1-item-1",
+        },
+        {
+          receiptUploadId: "receipt_2",
+          householdId: "household_1",
+          receiptImageDataUrl: "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD",
+        },
+      ],
+    });
+    expect(request.receipts).toHaveLength(2);
+
+    const response = BatchReceiptProcessResponseSchema.parse({
+      batchId: "batch_1",
+      requested: 2,
+      accepted: 1,
+      rejected: 1,
+      results: [
+        {
+          receiptUploadId: "receipt_1",
+          householdId: "household_1",
+          accepted: true,
+          job: {
+            jobId: "job_1",
+            receiptUploadId: "receipt_1",
+            householdId: "household_1",
+            status: "queued",
+            attempts: 0,
+            createdAt: "2026-02-09T12:00:00.000Z",
+            updatedAt: "2026-02-09T12:00:00.000Z",
+          },
+        },
+        {
+          receiptUploadId: "receipt_missing",
+          householdId: "household_1",
+          accepted: false,
+          error: "receipt upload not found",
+        },
+      ],
+    });
+    expect(response.rejected).toBe(1);
+
+    const tooMany = BatchReceiptProcessRequestSchema.safeParse({
+      receipts: Array.from({ length: 11 }, () => ({
+        receiptUploadId: "receipt_x",
+        householdId: "household_1",
+        ocrText: "Rice 1kg",
+      })),
+    });
+    expect(tooMany.success).toBe(false);
   });
 
   it("validates receipt details with parsed items", () => {

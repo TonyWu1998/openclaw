@@ -1,4 +1,6 @@
 import type {
+  BatchReceiptProcessRequest,
+  BatchReceiptProcessResponse,
   ClaimedJob,
   DailyRecommendationsResponse,
   ExpiryRiskResponse,
@@ -75,6 +77,8 @@ export class InMemoryJobStore implements ReceiptJobStore {
   private readonly uploads = new Map<string, ReceiptDetailsResponse["receipt"]>();
   private readonly jobs = new Map<string, ReceiptProcessJob>();
   private readonly queue: string[] = [];
+  private readonly batchEnqueueIdempotency = new Map<string, string>();
+  private readonly batchGroupByJobId = new Map<string, string>();
   private readonly inventoryLots = new Map<string, InventoryLot[]>();
   private readonly inventoryEvents = new Map<string, InventoryEvent[]>();
   private readonly dailyRecommendations = new Map<string, DailyRecommendationsResponse>();
@@ -168,6 +172,86 @@ export class InMemoryJobStore implements ReceiptJobStore {
     this.jobs.set(jobId, job);
     this.queue.push(jobId);
     return clone(job);
+  }
+
+  enqueueBatchJobs(request: BatchReceiptProcessRequest): BatchReceiptProcessResponse {
+    const batchId = `batch_${randomUUID()}`;
+    let accepted = 0;
+
+    const results = request.receipts.map((entry) => {
+      if (
+        (entry.ocrText?.trim().length ?? 0) === 0 &&
+        (entry.receiptImageDataUrl?.trim().length ?? 0) === 0
+      ) {
+        return {
+          receiptUploadId: entry.receiptUploadId,
+          householdId: entry.householdId,
+          accepted: false,
+          error: "ocrText or receiptImageDataUrl is required",
+        };
+      }
+
+      const idempotencyScope = entry.idempotencyKey
+        ? `${entry.householdId}:${entry.receiptUploadId}:${entry.idempotencyKey}`
+        : undefined;
+
+      if (idempotencyScope) {
+        const existingJobId = this.batchEnqueueIdempotency.get(idempotencyScope);
+        if (existingJobId) {
+          const existingJob = this.jobs.get(existingJobId);
+          if (existingJob) {
+            accepted += 1;
+            return {
+              receiptUploadId: entry.receiptUploadId,
+              householdId: entry.householdId,
+              accepted: true,
+              job: clone(existingJob),
+            };
+          }
+        }
+      }
+
+      try {
+        const job = this.enqueueJob({
+          householdId: entry.householdId,
+          receiptUploadId: entry.receiptUploadId,
+          request: {
+            householdId: entry.householdId,
+            ocrText: entry.ocrText,
+            receiptImageDataUrl: entry.receiptImageDataUrl,
+            merchantName: entry.merchantName,
+            purchasedAt: entry.purchasedAt,
+          },
+        });
+        this.batchGroupByJobId.set(job.jobId, batchId);
+        if (idempotencyScope) {
+          this.batchEnqueueIdempotency.set(idempotencyScope, job.jobId);
+        }
+        accepted += 1;
+        return {
+          receiptUploadId: entry.receiptUploadId,
+          householdId: entry.householdId,
+          accepted: true,
+          job,
+        };
+      } catch (error) {
+        return {
+          receiptUploadId: entry.receiptUploadId,
+          householdId: entry.householdId,
+          accepted: false,
+          error: normalizeErrorMessage(error),
+        };
+      }
+    });
+
+    const requested = request.receipts.length;
+    return {
+      batchId,
+      requested,
+      accepted,
+      rejected: requested - accepted,
+      results,
+    };
   }
 
   getJob(jobId: string): ReceiptProcessJob | null {
@@ -369,11 +453,14 @@ export class InMemoryJobStore implements ReceiptJobStore {
     }
 
     const now = nowIso();
+    const batchGroupId = this.batchGroupByJobId.get(jobId);
+    const batchNote = batchGroupId ? `batch:${batchGroupId}` : job.notes;
     if (job.attempts < this.maxJobAttempts) {
       const retried: ReceiptProcessJob = {
         ...job,
         status: "queued",
         error,
+        notes: batchNote,
         updatedAt: now,
       };
 
@@ -387,6 +474,7 @@ export class InMemoryJobStore implements ReceiptJobStore {
       ...job,
       status: "failed",
       error,
+      notes: batchNote,
       updatedAt: now,
     };
 
@@ -1211,6 +1299,13 @@ function normalizeCheckinLines(lines: MealCheckinLine[]): MealCheckinLine[] {
           : undefined,
     }))
     .filter((line) => line.itemKey.length > 0);
+}
+
+function normalizeErrorMessage(error: unknown): string {
+  if (error instanceof Error) {
+    return error.message;
+  }
+  return String(error);
 }
 
 function defaultSignalValue(signalType: RecommendationFeedbackRequest["signalType"]): number {

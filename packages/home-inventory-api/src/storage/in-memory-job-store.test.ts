@@ -243,6 +243,91 @@ describe("InMemoryJobStore reliability", () => {
   });
 });
 
+describe("InMemoryJobStore phase5d batch receipt enqueue", () => {
+  it("processes per-receipt validation and returns partial failures", () => {
+    const store = new InMemoryJobStore();
+    const upload = store.createUpload({
+      householdId: "household_batch",
+      filename: "batch-1.jpg",
+      contentType: "image/jpeg",
+    });
+
+    const response = store.enqueueBatchJobs({
+      receipts: [
+        {
+          receiptUploadId: upload.receiptUploadId,
+          householdId: "household_batch",
+          ocrText: "Rice 2kg",
+        },
+        {
+          receiptUploadId: "receipt_missing",
+          householdId: "household_batch",
+          ocrText: "Tomato x2",
+        },
+        {
+          receiptUploadId: upload.receiptUploadId,
+          householdId: "household_batch",
+        },
+      ],
+    });
+
+    expect(response.requested).toBe(3);
+    expect(response.accepted).toBe(1);
+    expect(response.rejected).toBe(2);
+    expect(response.results.filter((result) => result.accepted)).toHaveLength(1);
+    expect(
+      response.results.some((result) => !result.accepted && result.error?.includes("not found")),
+    ).toBe(true);
+    expect(
+      response.results.some(
+        (result) =>
+          !result.accepted && result.error === "ocrText or receiptImageDataUrl is required",
+      ),
+    ).toBe(true);
+  });
+
+  it("keeps batch enqueue idempotent for retrying the same receipt entry", () => {
+    const store = new InMemoryJobStore();
+    const upload = store.createUpload({
+      householdId: "household_batch_idempotent",
+      filename: "batch-idempotent.jpg",
+      contentType: "image/jpeg",
+    });
+
+    const first = store.enqueueBatchJobs({
+      receipts: [
+        {
+          receiptUploadId: upload.receiptUploadId,
+          householdId: "household_batch_idempotent",
+          ocrText: "Egg x12",
+          idempotencyKey: "batch-key-1",
+        },
+      ],
+    });
+    const second = store.enqueueBatchJobs({
+      receipts: [
+        {
+          receiptUploadId: upload.receiptUploadId,
+          householdId: "household_batch_idempotent",
+          ocrText: "Egg x12",
+          idempotencyKey: "batch-key-1",
+        },
+      ],
+    });
+
+    const firstJobId = first.results[0]?.job?.jobId;
+    const secondJobId = second.results[0]?.job?.jobId;
+    expect(firstJobId).toBeDefined();
+    expect(secondJobId).toBe(firstJobId);
+
+    const claimOne = store.claimNextJob();
+    expect(claimOne?.job.jobId).toBe(firstJobId);
+
+    const claimTwo = store.claimNextJob();
+    expect(claimTwo).toBeNull();
+  });
+});
+
 describe("InMemoryJobStore phase5a mutations", () => {
   it("applies receipt review deltas and writes receipt_review events", () => {
     const householdId = "household_review";

@@ -1,4 +1,6 @@
 import type {
+  BatchReceiptProcessRequest,
+  BatchReceiptProcessResponse,
   ClaimedJob,
   DailyRecommendationsResponse,
   ExpiryRiskResponse,
@@ -32,6 +34,7 @@ export type ReceiptJobStore = {
     receiptUploadId: string;
     request: ReceiptProcessRequest;
   }) => ReceiptProcessJob;
+  enqueueBatchJobs: (request: BatchReceiptProcessRequest) => BatchReceiptProcessResponse;
   getJob: (jobId: string) => ReceiptProcessJob | null;
   getReceipt: (receiptUploadId: string) => ReceiptDetailsResponse | null;
   reviewReceipt: (

@@ -5,6 +5,7 @@ import {
 } from "@openclaw/home-inventory-contracts";
 import type { ReceiptExtractor } from "./types.js";
 import { HeuristicReceiptExtractor } from "./heuristic-extractor.js";
+import { preprocessReceiptImageDataUrl } from "./image-preprocessor.js";
 import { normalizeDraftItems } from "./normalization.js";
 import {
   OpenAiReceiptExtractor,
@@ -16,24 +17,35 @@ export type ReceiptProcessor = {
   process: (claimedJob: ClaimedJob) => Promise<JobResultRequest>;
 };
 
+type ReceiptImagePreprocessor = {
+  preprocess: (dataUrl: string | undefined) => Promise<string | undefined>;
+};
+
 type ReceiptProcessorOptions = {
   primaryExtractor: ReceiptExtractor;
   fallbackExtractor: ReceiptExtractor;
+  imagePreprocessor?: ReceiptImagePreprocessor;
 };
 
 export class PhaseTwoReceiptProcessor implements ReceiptProcessor {
   private readonly primaryExtractor: ReceiptExtractor;
   private readonly fallbackExtractor: ReceiptExtractor;
+  private readonly imagePreprocessor: ReceiptImagePreprocessor;
 
   constructor(options: ReceiptProcessorOptions) {
     this.primaryExtractor = options.primaryExtractor;
     this.fallbackExtractor = options.fallbackExtractor;
+    this.imagePreprocessor = options.imagePreprocessor ?? {
+      preprocess: preprocessReceiptImageDataUrl,
+    };
   }
 
   async process(claimedJob: ClaimedJob): Promise<JobResultRequest> {
     const ocrText = claimedJob.receipt.ocrText?.trim() ?? "";
     const receiptImageDataUrl = claimedJob.receipt.receiptImageDataUrl?.trim();
-    if (ocrText.length === 0 && !receiptImageDataUrl) {
+    const preprocessedImageDataUrl = await this.imagePreprocessor.preprocess(receiptImageDataUrl);
+    const extractionImageDataUrl = preprocessedImageDataUrl ?? receiptImageDataUrl;
+    if (ocrText.length === 0 && !extractionImageDataUrl) {
       throw new Error(
         `receipt ${claimedJob.receipt.receiptUploadId} has neither OCR text nor image data`,
       );
@@ -42,7 +54,7 @@ export class PhaseTwoReceiptProcessor implements ReceiptProcessor {
     const extractionInput = {
       ocrText,
       merchantName: claimedJob.receipt.merchantName,
-      receiptImageDataUrl,
+      receiptImageDataUrl: extractionImageDataUrl,
     };
 
     let drafts;

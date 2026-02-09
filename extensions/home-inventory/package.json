@@ -1,0 +1,17 @@
+{
+  "name": "@openclaw/home-inventory",
+  "version": "2026.2.6-3",
+  "description": "OpenClaw extension for home inventory recommendation orchestration",
+  "type": "module",
+  "scripts": {
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "openclaw": "workspace:*"
+  },
+  "openclaw": {
+    "extensions": [
+      "./index.ts"
+    ]
+  }
+}

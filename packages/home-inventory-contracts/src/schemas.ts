@@ -235,6 +235,50 @@ export const ExpiryRiskResponseSchema = z.object({
   items: z.array(ExpiryRiskItemSchema),
 });
 
+export const MealCheckinStatusSchema = z.enum(["pending", "completed", "needs_adjustment"]);
+export const MealCheckinOutcomeSchema = z.enum(["made", "skipped", "partial"]);
+
+export const MealCheckinLineSchema = z.object({
+  itemKey: z.string().min(1).max(160),
+  unit: UnitSchema,
+  quantityConsumed: z.number().nonnegative().optional(),
+  quantityWasted: z.number().nonnegative().optional(),
+});
+
+export const MealCheckinSchema = z.object({
+  checkinId: IdSchema,
+  recommendationId: IdSchema,
+  householdId: IdSchema,
+  mealDate: z.iso.date(),
+  title: z.string().min(1).max(200),
+  suggestedItemKeys: z.array(z.string().min(1).max(160)),
+  status: MealCheckinStatusSchema,
+  outcome: MealCheckinOutcomeSchema.optional(),
+  lines: z.array(MealCheckinLineSchema).optional(),
+  notes: z.string().max(500).optional(),
+  createdAt: z.iso.datetime(),
+  updatedAt: z.iso.datetime(),
+});
+
+export const MealCheckinPendingResponseSchema = z.object({
+  householdId: IdSchema,
+  checkins: z.array(MealCheckinSchema),
+});
+
+export const MealCheckinSubmitRequestSchema = z.object({
+  householdId: IdSchema,
+  outcome: MealCheckinOutcomeSchema,
+  lines: z.array(MealCheckinLineSchema).optional(),
+  notes: z.string().max(500).optional(),
+  idempotencyKey: z.string().min(1).max(128).optional(),
+});
+
+export const MealCheckinSubmitResponseSchema = z.object({
+  checkin: MealCheckinSchema,
+  inventory: InventorySnapshotResponseSchema,
+  eventsCreated: z.number().int().min(0),
+});
+
 export const RecommendationRunTypeSchema = z.enum(["daily", "weekly"]);
 export const RecommendationPrioritySchema = z.enum(["high", "medium", "low"]);
 export const FeedbackSignalTypeSchema = z.enum([
@@ -358,6 +402,13 @@ export type LotExpiryOverrideResponse = z.infer<typeof LotExpiryOverrideResponse
 export type ExpiryRiskLevel = z.infer<typeof ExpiryRiskLevelSchema>;
 export type ExpiryRiskItem = z.infer<typeof ExpiryRiskItemSchema>;
 export type ExpiryRiskResponse = z.infer<typeof ExpiryRiskResponseSchema>;
+export type MealCheckinStatus = z.infer<typeof MealCheckinStatusSchema>;
+export type MealCheckinOutcome = z.infer<typeof MealCheckinOutcomeSchema>;
+export type MealCheckinLine = z.infer<typeof MealCheckinLineSchema>;
+export type MealCheckin = z.infer<typeof MealCheckinSchema>;
+export type MealCheckinPendingResponse = z.infer<typeof MealCheckinPendingResponseSchema>;
+export type MealCheckinSubmitRequest = z.infer<typeof MealCheckinSubmitRequestSchema>;
+export type MealCheckinSubmitResponse = z.infer<typeof MealCheckinSubmitResponseSchema>;
 export type RecommendationRunType = z.infer<typeof RecommendationRunTypeSchema>;
 export type RecommendationPriority = z.infer<typeof RecommendationPrioritySchema>;
 export type FeedbackSignalType = z.infer<typeof FeedbackSignalTypeSchema>;

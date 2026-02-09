@@ -312,6 +312,37 @@ describe("home inventory api", () => {
     const recommendationId = dailyPayload.recommendations[0]?.recommendationId;
     expect(recommendationId).toBeDefined();
 
+    const pendingCheckinsResponse = await fetch(`${baseUrl}/v1/checkins/household_main/pending`);
+    expect(pendingCheckinsResponse.status).toBe(200);
+    const pendingCheckinsPayload = (await pendingCheckinsResponse.json()) as {
+      checkins: Array<{ checkinId: string }>;
+    };
+    const checkinId = pendingCheckinsPayload.checkins[0]?.checkinId;
+    expect(checkinId).toBeDefined();
+
+    const submitCheckinResponse = await fetch(`${baseUrl}/v1/checkins/${checkinId}/submit`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        householdId: "household_main",
+        outcome: "made",
+        lines: [
+          {
+            itemKey: "tomato",
+            unit: "count",
+            quantityConsumed: 2,
+          },
+        ],
+      }),
+    });
+    expect(submitCheckinResponse.status).toBe(200);
+    const submitCheckinPayload = (await submitCheckinResponse.json()) as {
+      checkin: { status: string };
+      eventsCreated: number;
+    };
+    expect(submitCheckinPayload.checkin.status).toBe("completed");
+    expect(submitCheckinPayload.eventsCreated).toBeGreaterThan(0);
+
     const feedbackResponse = await fetch(
       `${baseUrl}/v1/recommendations/${recommendationId}/feedback`,
       {
@@ -502,6 +533,93 @@ describe("home inventory api", () => {
     });
 
     expect(response.status).toBe(404);
+  });
+
+  it("marks made checkin without quantity lines as needs_adjustment", async () => {
+    const { baseUrl } = await startTestServer();
+
+    const uploadResponse = await fetch(`${baseUrl}/v1/receipts/upload-url`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        householdId: "household_checkin_adjust",
+        filename: "checkin-adjust.jpg",
+        contentType: "image/jpeg",
+      }),
+    });
+    const uploadPayload = (await uploadResponse.json()) as { receiptUploadId: string };
+
+    const enqueueResponse = await fetch(
+      `${baseUrl}/v1/receipts/${uploadPayload.receiptUploadId}/process`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          householdId: "household_checkin_adjust",
+          ocrText: "Tomato x3",
+        }),
+      },
+    );
+    const enqueuePayload = (await enqueueResponse.json()) as { job: { jobId: string } };
+
+    await fetch(`${baseUrl}/internal/jobs/claim`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-home-inventory-worker-token": "test-worker-token",
+      },
+      body: JSON.stringify({}),
+    });
+
+    await fetch(`${baseUrl}/internal/jobs/${enqueuePayload.job.jobId}/result`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-home-inventory-worker-token": "test-worker-token",
+      },
+      body: JSON.stringify({
+        items: [
+          {
+            itemKey: "tomato",
+            rawName: "Tomato",
+            normalizedName: "tomato",
+            quantity: 3,
+            unit: "count",
+            category: "produce",
+            confidence: 0.8,
+          },
+        ],
+      }),
+    });
+
+    await fetch(`${baseUrl}/v1/recommendations/household_checkin_adjust/daily/generate`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ date: "2026-02-10" }),
+    });
+
+    const pendingResponse = await fetch(`${baseUrl}/v1/checkins/household_checkin_adjust/pending`);
+    const pendingPayload = (await pendingResponse.json()) as {
+      checkins: Array<{ checkinId: string }>;
+    };
+    const checkinId = pendingPayload.checkins[0]?.checkinId;
+    expect(checkinId).toBeDefined();
+
+    const submitResponse = await fetch(`${baseUrl}/v1/checkins/${checkinId}/submit`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        householdId: "household_checkin_adjust",
+        outcome: "made",
+      }),
+    });
+    expect(submitResponse.status).toBe(200);
+    const submitPayload = (await submitResponse.json()) as {
+      checkin: { status: string };
+      eventsCreated: number;
+    };
+    expect(submitPayload.checkin.status).toBe("needs_adjustment");
+    expect(submitPayload.eventsCreated).toBe(0);
   });
 
   it("rejects internal worker actions without correct token", async () => {

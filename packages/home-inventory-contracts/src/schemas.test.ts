@@ -10,6 +10,9 @@ import {
   LotExpiryOverrideResponseSchema,
   ManualInventoryEntryRequestSchema,
   ManualInventoryEntryResponseSchema,
+  MealCheckinPendingResponseSchema,
+  MealCheckinSubmitRequestSchema,
+  MealCheckinSubmitResponseSchema,
   RecommendationFeedbackRequestSchema,
   ReceiptProcessRequestSchema,
   ReceiptReviewRequestSchema,
@@ -316,5 +319,64 @@ describe("home inventory contract schemas", () => {
       ],
     });
     expect(parsed.items[0]?.riskLevel).toBe("critical");
+  });
+
+  it("validates meal checkin submit request and response", () => {
+    const request = MealCheckinSubmitRequestSchema.parse({
+      householdId: "household_1",
+      outcome: "made",
+      lines: [
+        {
+          itemKey: "tomato",
+          unit: "count",
+          quantityConsumed: 2,
+        },
+      ],
+      idempotencyKey: "checkin-1",
+    });
+    expect(request.outcome).toBe("made");
+
+    const response = MealCheckinSubmitResponseSchema.parse({
+      checkin: {
+        checkinId: "checkin_1",
+        recommendationId: "rec_1",
+        householdId: "household_1",
+        mealDate: "2026-02-09",
+        title: "Tomato rice bowl",
+        suggestedItemKeys: ["tomato", "jasmine-rice"],
+        status: "completed",
+        outcome: "made",
+        lines: request.lines,
+        createdAt: "2026-02-09T12:00:00.000Z",
+        updatedAt: "2026-02-09T18:30:00.000Z",
+      },
+      inventory: {
+        householdId: "household_1",
+        lots: [],
+        events: [],
+      },
+      eventsCreated: 1,
+    });
+    expect(response.eventsCreated).toBe(1);
+  });
+
+  it("validates pending meal checkin response", () => {
+    const parsed = MealCheckinPendingResponseSchema.parse({
+      householdId: "household_1",
+      checkins: [
+        {
+          checkinId: "checkin_1",
+          recommendationId: "rec_1",
+          householdId: "household_1",
+          mealDate: "2026-02-09",
+          title: "Tomato rice bowl",
+          suggestedItemKeys: ["tomato", "jasmine-rice"],
+          status: "pending",
+          createdAt: "2026-02-09T06:00:00.000Z",
+          updatedAt: "2026-02-09T06:00:00.000Z",
+        },
+      ],
+    });
+    expect(parsed.checkins).toHaveLength(1);
   });
 });

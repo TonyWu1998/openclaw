@@ -377,3 +377,170 @@ describe("InMemoryJobStore phase5b expiry intelligence", () => {
     expect(risk.items.every((entry) => entry.riskLevel.length > 0)).toBe(true);
   });
 });
+
+describe("InMemoryJobStore phase5c meal checkins", () => {
+  it("creates pending checkins and applies FEFO depletion when quantities are provided", async () => {
+    const householdId = "household_checkin_fefo";
+    const planner: RecommendationPlanner = {
+      generateDaily: async () => ({
+        model: "planner/mock-v1",
+        recommendations: [
+          {
+            title: "Tomato soup",
+            cuisine: "mixed",
+            rationale: "Use tomato first.",
+            itemKeys: ["tomato"],
+            score: 0.8,
+          },
+        ],
+      }),
+      generateWeekly: async () => ({ model: "planner/mock-v1", recommendations: [] }),
+    };
+
+    const store = new InMemoryJobStore({ recommendationPlanner: planner });
+    store.addManualItems(householdId, {
+      items: [
+        {
+          itemKey: "tomato",
+          rawName: "Tomato",
+          normalizedName: "tomato",
+          quantity: 2,
+          unit: "count",
+          category: "produce",
+          confidence: 1,
+        },
+      ],
+      purchasedAt: "2026-02-01T00:00:00.000Z",
+    });
+    store.addManualItems(householdId, {
+      items: [
+        {
+          itemKey: "tomato",
+          rawName: "Tomato",
+          normalizedName: "tomato",
+          quantity: 2,
+          unit: "count",
+          category: "produce",
+          confidence: 1,
+        },
+      ],
+      purchasedAt: "2026-02-05T00:00:00.000Z",
+    });
+
+    const seeded = store.getInventory(householdId);
+    const lots = seeded.lots.filter((lot) => lot.itemKey === "tomato");
+    expect(lots).toHaveLength(2);
+    const oldestLot = lots.find((lot) => lot.purchasedAt === "2026-02-01T00:00:00.000Z");
+    const newestLot = lots.find((lot) => lot.purchasedAt === "2026-02-05T00:00:00.000Z");
+    expect(oldestLot).toBeDefined();
+    expect(newestLot).toBeDefined();
+    if (!oldestLot || !newestLot) {
+      throw new Error("expected seeded tomato lots");
+    }
+
+    store.overrideLotExpiry(householdId, oldestLot.lotId, {
+      householdId,
+      expiresAt: "2026-02-10T00:00:00.000Z",
+    });
+    store.overrideLotExpiry(householdId, newestLot.lotId, {
+      householdId,
+      expiresAt: "2026-02-20T00:00:00.000Z",
+    });
+
+    await store.generateDailyRecommendations(householdId, { date: "2026-02-09" });
+    const pending = store.listPendingCheckins(householdId);
+    const checkinId = pending.checkins[0]?.checkinId;
+    expect(checkinId).toBeDefined();
+    if (!checkinId) {
+      throw new Error("expected pending checkin");
+    }
+
+    const submitted = store.submitMealCheckin(checkinId, {
+      householdId,
+      outcome: "made",
+      lines: [
+        {
+          itemKey: "tomato",
+          unit: "count",
+          quantityConsumed: 3,
+        },
+      ],
+    });
+
+    expect(submitted?.checkin.status).toBe("completed");
+    expect(submitted?.eventsCreated).toBe(2);
+
+    const after = store.getInventory(householdId);
+    const remainingTomato = after.lots.filter((lot) => lot.itemKey === "tomato");
+    expect(remainingTomato).toHaveLength(1);
+    expect(remainingTomato[0]?.quantityRemaining).toBe(1);
+    expect(remainingTomato[0]?.lotId).toBe(newestLot.lotId);
+    expect(after.events.filter((event) => event.eventType === "consume")).toHaveLength(2);
+  });
+
+  it("feeds consumed checkin signal back into planner feedback", async () => {
+    const generateWeeklyMock = vi.fn(async () => ({
+      model: "planner/mock-v1",
+      recommendations: [],
+    }));
+
+    const planner: RecommendationPlanner = {
+      generateDaily: async () => ({
+        model: "planner/mock-v1",
+        recommendations: [
+          {
+            title: "Tomato rice bowl",
+            cuisine: "mixed",
+            rationale: "use tomato stock",
+            itemKeys: ["tomato"],
+            score: 0.75,
+          },
+        ],
+      }),
+      generateWeekly: generateWeeklyMock,
+    };
+
+    const householdId = "household_checkin_feedback";
+    const store = new InMemoryJobStore({ recommendationPlanner: planner });
+    store.addManualItems(householdId, {
+      items: [
+        {
+          itemKey: "tomato",
+          rawName: "Tomato",
+          normalizedName: "tomato",
+          quantity: 2,
+          unit: "count",
+          category: "produce",
+          confidence: 1,
+        },
+      ],
+    });
+
+    await store.generateDailyRecommendations(householdId, { date: "2026-02-09" });
+    const checkinId = store.listPendingCheckins(householdId).checkins[0]?.checkinId;
+    if (!checkinId) {
+      throw new Error("expected pending checkin");
+    }
+
+    store.submitMealCheckin(checkinId, {
+      householdId,
+      outcome: "made",
+      lines: [
+        {
+          itemKey: "tomato",
+          unit: "count",
+          quantityConsumed: 1,
+        },
+      ],
+    });
+
+    await store.generateWeeklyRecommendations(householdId, { weekOf: "2026-02-09" });
+    expect(generateWeeklyMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        feedbackByItem: {
+          tomato: 0.75,
+        },
+      }),
+    );
+  });
+});

@@ -17,6 +17,9 @@ import {
   LotExpiryOverrideResponseSchema,
   ManualInventoryEntryRequestSchema,
   ManualInventoryEntryResponseSchema,
+  MealCheckinPendingResponseSchema,
+  MealCheckinSubmitRequestSchema,
+  MealCheckinSubmitResponseSchema,
   RecommendationFeedbackRequestSchema,
   RecommendationFeedbackResponseSchema,
   ReceiptDetailsResponseSchema,
@@ -198,6 +201,36 @@ export function createApp(params: CreateAppParams): Express {
 
     const response = params.store.getExpiryRisk(householdId);
     res.json(ExpiryRiskResponseSchema.parse(response));
+  });
+
+  app.get("/v1/checkins/:householdId/pending", (req, res) => {
+    const householdId = parseParam(req.params.householdId, "householdId", res);
+    if (!householdId) {
+      return;
+    }
+
+    const response = params.store.listPendingCheckins(householdId);
+    res.json(MealCheckinPendingResponseSchema.parse(response));
+  });
+
+  app.post("/v1/checkins/:checkinId/submit", (req, res) => {
+    const checkinId = parseParam(req.params.checkinId, "checkinId", res);
+    if (!checkinId) {
+      return;
+    }
+
+    const body = parseBody(MealCheckinSubmitRequestSchema, req, res);
+    if (!body) {
+      return;
+    }
+
+    const response = params.store.submitMealCheckin(checkinId, body);
+    if (!response) {
+      res.status(404).json({ error: "not_found", message: `checkin not found: ${checkinId}` });
+      return;
+    }
+
+    res.json(MealCheckinSubmitResponseSchema.parse(response));
   });
 
   app.get("/v1/recommendations/:householdId/daily", (req, res) => {

@@ -1,0 +1,232 @@
+import type { JobResultRequest, ReceiptItem } from "@openclaw/home-inventory-contracts";
+import type { AddressInfo } from "node:net";
+import {
+  DailyRecommendationsResponseSchema,
+  EnqueueJobResponseSchema,
+  HealthResponseSchema,
+  InventorySnapshotResponseSchema,
+  JobResultResponseSchema,
+  JobStatusResponseSchema,
+  ReceiptDetailsResponseSchema,
+  ReceiptUploadResponseSchema,
+  RecommendationFeedbackResponseSchema,
+  WeeklyRecommendationsResponseSchema,
+} from "@openclaw/home-inventory-contracts";
+import { afterEach, describe, expect, it } from "vitest";
+import type { ApiConfig } from "./config/env.js";
+import { createApp } from "./app.js";
+import { InMemoryJobStore } from "./storage/in-memory-job-store.js";
+
+type RunningServer = {
+  baseUrl: string;
+  close: () => Promise<void>;
+};
+
+const servers: RunningServer[] = [];
+
+afterEach(async () => {
+  while (servers.length > 0) {
+    const server = servers.pop();
+    if (server) {
+      await server.close();
+    }
+  }
+});
+
+async function startServer(config?: Partial<ApiConfig>): Promise<RunningServer> {
+  const mergedConfig: ApiConfig = {
+    port: 0,
+    workerToken: config?.workerToken ?? "test-worker-token",
+    uploadOrigin: config?.uploadOrigin ?? "https://uploads.test.local",
+  };
+
+  const app = createApp({
+    config: mergedConfig,
+    store: new InMemoryJobStore({ uploadOrigin: mergedConfig.uploadOrigin }),
+  });
+
+  const listener = await new Promise<ReturnType<typeof app.listen>>((resolve) => {
+    const server = app.listen(0, () => resolve(server));
+  });
+
+  const address = listener.address() as AddressInfo;
+  const running: RunningServer = {
+    baseUrl: `http://127.0.0.1:${address.port}`,
+    close: () =>
+      new Promise((resolve, reject) => {
+        listener.close((error) => {
+          if (error) {
+            reject(error);
+            return;
+          }
+          resolve();
+        });
+      }),
+  };
+
+  servers.push(running);
+  return running;
+}
+
+const EXTRACTED_ITEMS: ReceiptItem[] = [
+  {
+    itemKey: "jasmine-rice",
+    rawName: "Jasmine Rice 2kg",
+    normalizedName: "jasmine rice",
+    quantity: 2,
+    unit: "kg",
+    category: "grain",
+    confidence: 0.94,
+  },
+  {
+    itemKey: "tomato",
+    rawName: "Tomato",
+    normalizedName: "tomato",
+    quantity: 4,
+    unit: "count",
+    category: "produce",
+    confidence: 0.88,
+  },
+];
+
+describe("home inventory API public contracts", () => {
+  it("validates each public endpoint payload against shared schemas", async () => {
+    const { baseUrl } = await startServer();
+
+    const healthResponse = await fetch(`${baseUrl}/health`);
+    const healthPayload = HealthResponseSchema.parse(await healthResponse.json());
+    expect(healthPayload.ok).toBe(true);
+
+    const uploadResponse = await fetch(`${baseUrl}/v1/receipts/upload-url`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        householdId: "household_contract",
+        filename: "contract-receipt.jpg",
+        contentType: "image/jpeg",
+      }),
+    });
+
+    const uploadPayload = ReceiptUploadResponseSchema.parse(await uploadResponse.json());
+    expect(uploadResponse.status).toBe(201);
+
+    const enqueueResponse = await fetch(
+      `${baseUrl}/v1/receipts/${uploadPayload.receiptUploadId}/process`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          householdId: "household_contract",
+          ocrText: "Jasmine Rice 2kg\\nTomato x4",
+          merchantName: "Contract Market",
+          purchasedAt: "2026-02-08T12:00:00.000Z",
+        }),
+      },
+    );
+
+    const enqueuePayload = EnqueueJobResponseSchema.parse(await enqueueResponse.json());
+    const jobId = enqueuePayload.job.jobId;
+    expect(enqueueResponse.status).toBe(202);
+
+    const queuedStatusResponse = await fetch(`${baseUrl}/v1/jobs/${jobId}`);
+    const queuedStatus = JobStatusResponseSchema.parse(await queuedStatusResponse.json());
+    expect(queuedStatus.job.status).toBe("queued");
+
+    const claimResponse = await fetch(`${baseUrl}/internal/jobs/claim`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-home-inventory-worker-token": "test-worker-token",
+      },
+      body: JSON.stringify({}),
+    });
+
+    expect(claimResponse.status).toBe(200);
+
+    const jobResultPayload: JobResultRequest = {
+      merchantName: "Contract Market",
+      purchasedAt: "2026-02-08T12:00:00.000Z",
+      ocrText: "Jasmine Rice 2kg\\nTomato x4",
+      items: EXTRACTED_ITEMS,
+      notes: "contract test result",
+    };
+
+    const resultResponse = await fetch(`${baseUrl}/internal/jobs/${jobId}/result`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-home-inventory-worker-token": "test-worker-token",
+      },
+      body: JSON.stringify(jobResultPayload),
+    });
+
+    const resultPayload = JobResultResponseSchema.parse(await resultResponse.json());
+    expect(resultPayload.job.status).toBe("completed");
+
+    const receiptResponse = await fetch(`${baseUrl}/v1/receipts/${uploadPayload.receiptUploadId}`);
+    const receiptPayload = ReceiptDetailsResponseSchema.parse(await receiptResponse.json());
+    expect(receiptPayload.receipt.status).toBe("parsed");
+
+    const inventoryResponse = await fetch(`${baseUrl}/v1/inventory/household_contract`);
+    const inventoryPayload = InventorySnapshotResponseSchema.parse(await inventoryResponse.json());
+    expect(inventoryPayload.householdId).toBe("household_contract");
+
+    const dailyGenerateResponse = await fetch(
+      `${baseUrl}/v1/recommendations/household_contract/daily/generate`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ date: "2026-02-09" }),
+      },
+    );
+
+    const dailyGenerated = DailyRecommendationsResponseSchema.parse(
+      await dailyGenerateResponse.json(),
+    );
+    expect(dailyGenerated.recommendations.length).toBeGreaterThan(0);
+
+    const dailyReadResponse = await fetch(`${baseUrl}/v1/recommendations/household_contract/daily`);
+    const dailyRead = DailyRecommendationsResponseSchema.parse(await dailyReadResponse.json());
+    expect(dailyRead.run.runType).toBe("daily");
+
+    const recommendationId = dailyRead.recommendations[0]?.recommendationId;
+    expect(recommendationId).toBeDefined();
+
+    const feedbackResponse = await fetch(
+      `${baseUrl}/v1/recommendations/${recommendationId}/feedback`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          householdId: "household_contract",
+          signalType: "accepted",
+        }),
+      },
+    );
+
+    const feedbackPayload = RecommendationFeedbackResponseSchema.parse(
+      await feedbackResponse.json(),
+    );
+    expect(feedbackPayload.feedback.signalType).toBe("accepted");
+
+    const weeklyGenerateResponse = await fetch(
+      `${baseUrl}/v1/recommendations/household_contract/weekly/generate`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ weekOf: "2026-02-09" }),
+      },
+    );
+
+    const weeklyGenerated = WeeklyRecommendationsResponseSchema.parse(
+      await weeklyGenerateResponse.json(),
+    );
+    expect(weeklyGenerated.run.runType).toBe("weekly");
+
+    const weeklyReadResponse = await fetch(
+      `${baseUrl}/v1/recommendations/household_contract/weekly`,
+    );
+    const weeklyRead = WeeklyRecommendationsResponseSchema.parse(await weeklyReadResponse.json());
+    expect(weeklyRead.run.runType).toBe("weekly");
+  });
+});

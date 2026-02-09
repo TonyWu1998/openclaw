@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   ClaimJobResponseSchema,
   DailyRecommendationsResponseSchema,
+  JobStatusResponseSchema,
   JobResultRequestSchema,
   JobStatusSchema,
   RecommendationFeedbackRequestSchema,
@@ -139,5 +140,21 @@ describe("home inventory contract schemas", () => {
     });
 
     expect(parsed.signalType).toBe("accepted");
+  });
+
+  it("validates job status response payload", () => {
+    const parsed = JobStatusResponseSchema.parse({
+      job: {
+        jobId: "job_1",
+        receiptUploadId: "receipt_1",
+        householdId: "household_1",
+        status: "queued",
+        attempts: 1,
+        createdAt: "2026-02-08T12:00:00.000Z",
+        updatedAt: "2026-02-08T12:00:01.000Z",
+      },
+    });
+
+    expect(parsed.job.status).toBe("queued");
   });
 });

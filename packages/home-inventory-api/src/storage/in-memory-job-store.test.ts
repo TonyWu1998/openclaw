@@ -158,3 +158,87 @@ describe("InMemoryJobStore recommendation loop", () => {
     expect(feedback).toBeNull();
   });
 });
+
+describe("InMemoryJobStore reliability", () => {
+  it("requeues failures until max attempts then dead-letters the job", () => {
+    const store = new InMemoryJobStore({ maxJobAttempts: 2 });
+    const householdId = "household_retry";
+
+    const upload = store.createUpload({
+      householdId,
+      filename: "retry.jpg",
+      contentType: "image/jpeg",
+    });
+
+    const enqueued = store.enqueueJob({
+      householdId,
+      receiptUploadId: upload.receiptUploadId,
+      request: { householdId, ocrText: "Milk 1L" },
+    });
+
+    const claimOne = store.claimNextJob();
+    expect(claimOne?.job.jobId).toBe(enqueued.jobId);
+    expect(claimOne?.job.attempts).toBe(1);
+
+    const retryState = store.failJob(enqueued.jobId, "temporary extraction failure");
+    expect(retryState?.status).toBe("queued");
+    expect(store.listDeadLetters()).toHaveLength(0);
+
+    const claimTwo = store.claimNextJob();
+    expect(claimTwo?.job.jobId).toBe(enqueued.jobId);
+    expect(claimTwo?.job.attempts).toBe(2);
+
+    const finalState = store.failJob(enqueued.jobId, "permanent extraction failure");
+    expect(finalState?.status).toBe("failed");
+
+    const deadLetters = store.listDeadLetters();
+    expect(deadLetters).toHaveLength(1);
+    expect(deadLetters[0]?.jobId).toBe(enqueued.jobId);
+    expect(deadLetters[0]?.attempts).toBe(2);
+  });
+
+  it("meets a NAS-oriented in-memory soak profile for core inventory mutations", () => {
+    const store = new InMemoryJobStore();
+    const householdId = "household_soak";
+    const startedAt = Date.now();
+
+    for (let index = 0; index < 400; index += 1) {
+      const upload = store.createUpload({
+        householdId,
+        filename: `receipt-${index}.jpg`,
+        contentType: "image/jpeg",
+      });
+
+      const enqueued = store.enqueueJob({
+        householdId,
+        receiptUploadId: upload.receiptUploadId,
+        request: {
+          householdId,
+          ocrText: `Rice ${index + 1}`,
+        },
+      });
+
+      store.submitJobResult(enqueued.jobId, {
+        ocrText: `Rice ${index + 1}`,
+        items: [
+          {
+            itemKey: "jasmine-rice",
+            rawName: `Jasmine Rice ${index + 1}kg`,
+            normalizedName: "jasmine rice",
+            quantity: 1,
+            unit: "kg",
+            category: "grain",
+            confidence: 0.9,
+          },
+        ],
+      });
+    }
+
+    const snapshot = store.getInventory(householdId);
+    const elapsedMs = Date.now() - startedAt;
+
+    expect(snapshot.lots.length).toBeGreaterThan(0);
+    expect(snapshot.events.length).toBe(400);
+    expect(elapsedMs).toBeLessThan(4000);
+  });
+});

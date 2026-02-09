@@ -1,5 +1,5 @@
-import { describe, expect, it, vi } from "vitest";
 import type { ClaimedJob, JobResultRequest } from "@openclaw/home-inventory-contracts";
+import { describe, expect, it, vi } from "vitest";
 import type { WorkerApiClient } from "../client/api-client.js";
 import type { ReceiptProcessor } from "../processor/receipt-processor.js";
 import { WorkerRunner } from "./worker-runner.js";
@@ -123,5 +123,69 @@ describe("WorkerRunner", () => {
 
     expect(handled).toBe(false);
     expect(processor.process).not.toHaveBeenCalled();
+  });
+
+  it("retries submit failures before succeeding", async () => {
+    const client: WorkerApiClient = {
+      claimJob: vi.fn(async () => createClaimedJob()),
+      submitJobResult: vi
+        .fn()
+        .mockRejectedValueOnce(new Error("submit timeout"))
+        .mockRejectedValueOnce(new Error("submit timeout"))
+        .mockResolvedValue(undefined),
+      failJob: vi.fn(async () => {}),
+    };
+
+    const processor: ReceiptProcessor = {
+      process: vi.fn(async () => createResult()),
+    };
+
+    const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+    const runner = new WorkerRunner({
+      client,
+      processor,
+      maxSubmitAttempts: 3,
+      submitRetryBaseMs: 0,
+      logger,
+    });
+
+    const handled = await runner.runOnce();
+
+    expect(handled).toBe(true);
+    expect(client.submitJobResult).toHaveBeenCalledTimes(3);
+    expect(client.failJob).not.toHaveBeenCalled();
+    expect(logger.warn).toHaveBeenCalledTimes(2);
+  });
+
+  it("logs report failure when failJob call itself errors", async () => {
+    const client: WorkerApiClient = {
+      claimJob: vi.fn(async () => createClaimedJob()),
+      submitJobResult: vi.fn(async () => {
+        throw new Error("submit unavailable");
+      }),
+      failJob: vi.fn(async () => {
+        throw new Error("fail endpoint unavailable");
+      }),
+    };
+
+    const processor: ReceiptProcessor = {
+      process: vi.fn(async () => createResult()),
+    };
+
+    const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+    const runner = new WorkerRunner({
+      client,
+      processor,
+      maxSubmitAttempts: 1,
+      submitRetryBaseMs: 0,
+      logger,
+    });
+
+    const handled = await runner.runOnce();
+
+    expect(handled).toBe(true);
+    expect(client.submitJobResult).toHaveBeenCalledTimes(1);
+    expect(client.failJob).toHaveBeenCalledTimes(1);
+    expect(logger.error).toHaveBeenCalledTimes(2);
   });
 });

@@ -8,6 +8,7 @@ Last updated: 2026-02-09
 - [x] Phase 2 completed and merged (`PR #2`): receipt extraction + normalization + inventory mutation events.
 - [x] Phase 3 completed: agent-driven recommendation generation, extension schedules, and feedback adaptation loop.
 - [x] Phase 4 completed: contract coverage, reliability retries/dead-letter behavior, worker restart recovery, and soak tests.
+- [x] LLM provider portability completed: OpenAI, OpenRouter, Gemini-compatible OpenAI APIs, and local OpenAI-compatible runtimes (for example LM Studio).
 
 ## Purpose
 
@@ -108,6 +109,19 @@ Implementation model:
   - stockout/waste penalties
 - Substitution strategy adapts:
   - if item availability is low and preference fit is high, recommend alternatives from known accepted foods.
+
+## LLM Provider Portability
+
+- The extraction and planning paths must support multiple model vendors through one configuration surface.
+- Default provider is OpenAI.
+- OpenRouter and Gemini-compatible OpenAI endpoints use chat-completions transport by default.
+- Local OpenAI-compatible runtimes (for example LM Studio) are supported without requiring a cloud API key.
+- Environment overrides:
+  - `HOME_INVENTORY_LLM_PROVIDER` (`openai`, `openrouter`, `gemini`, `lmstudio`, `openai-compatible`)
+  - `HOME_INVENTORY_LLM_BASE_URL`
+  - `HOME_INVENTORY_LLM_API_KEY`
+  - `HOME_INVENTORY_LLM_MODEL`
+  - `HOME_INVENTORY_LLM_REQUEST_MODE` (`responses` or `chat_completions`)
 
 ## Core Data Flow
 

@@ -18,7 +18,7 @@ create index if not exists idx_meal_checkins_household_status
   on meal_checkins (household_id, status, meal_date desc);
 
 create unique index if not exists uq_meal_checkins_idempotency
-  on meal_checkins (id, idempotency_key)
+  on meal_checkins (household_id, idempotency_key)
   where idempotency_key is not null;
 
 create table if not exists meal_checkin_lines (

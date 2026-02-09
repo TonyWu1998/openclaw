@@ -852,14 +852,18 @@ export class InMemoryJobStore implements ReceiptJobStore {
         lot.purchasedAt = purchasedAt;
       }
       if (lot.expirySource !== "exact") {
-        const estimatedExpiry = estimateLotExpiry({
-          category: item.category,
-          purchasedAt: lot.purchasedAt,
-        });
-        lot.expiresAt = estimatedExpiry.expiresAt;
-        lot.expiryEstimatedAt = estimatedExpiry.expiryEstimatedAt;
-        lot.expirySource = estimatedExpiry.expirySource;
-        lot.expiryConfidence = estimatedExpiry.expiryConfidence;
+        const hasStableEstimatedExpiry =
+          !lot.purchasedAt && !purchasedAt && lot.expiresAt && lot.expiryEstimatedAt;
+        if (!hasStableEstimatedExpiry) {
+          const estimatedExpiry = estimateLotExpiry({
+            category: item.category,
+            purchasedAt: lot.purchasedAt,
+          });
+          lot.expiresAt = estimatedExpiry.expiresAt;
+          lot.expiryEstimatedAt = estimatedExpiry.expiryEstimatedAt;
+          lot.expirySource = estimatedExpiry.expirySource;
+          lot.expiryConfidence = estimatedExpiry.expiryConfidence;
+        }
       }
 
       events.push({

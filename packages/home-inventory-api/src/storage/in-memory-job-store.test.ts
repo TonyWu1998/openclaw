@@ -767,3 +767,47 @@ describe("InMemoryJobStore phase5e shopping drafts", () => {
     expect(patchAfterFinalize?.draft.items[0]?.quantity).toBe(5);
   });
 });
+
+describe("InMemoryJobStore phase5f pantry health", () => {
+  it("computes and persists pantry health snapshots with history", () => {
+    const householdId = "household_health";
+    const store = new InMemoryJobStore();
+
+    store.addManualItems(householdId, {
+      items: [
+        {
+          itemKey: "milk",
+          rawName: "Milk",
+          normalizedName: "milk",
+          quantity: 0.5,
+          unit: "l",
+          category: "dairy",
+          confidence: 1,
+        },
+      ],
+      purchasedAt: "2026-02-08T00:00:00.000Z",
+    });
+
+    const first = store.refreshPantryHealth(householdId);
+    expect(first.score).toBeGreaterThanOrEqual(0);
+    expect(first.score).toBeLessThanOrEqual(100);
+    expect(first.subscores.expiry_risk).toBeGreaterThanOrEqual(0);
+
+    const latest = store.getLatestPantryHealth(householdId);
+    expect(latest?.asOf).toBe(first.asOf);
+
+    const history = store.getPantryHealthHistory(householdId);
+    expect(history.history.length).toBe(1);
+  });
+
+  it("keeps one snapshot per day when refreshing repeatedly", () => {
+    const householdId = "household_health_daily";
+    const store = new InMemoryJobStore();
+
+    store.refreshPantryHealth(householdId);
+    store.refreshPantryHealth(householdId);
+
+    const history = store.getPantryHealthHistory(householdId);
+    expect(history.history.length).toBe(1);
+  });
+});

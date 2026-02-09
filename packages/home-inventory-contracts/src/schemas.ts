@@ -423,6 +423,26 @@ export const ShoppingDraftResponseSchema = z.object({
   updated: z.boolean().optional(),
 });
 
+export const PantryHealthSubscoresSchema = z.object({
+  stock_balance: z.number().min(0).max(100),
+  expiry_risk: z.number().min(0).max(100),
+  waste_pressure: z.number().min(0).max(100),
+  plan_adherence: z.number().min(0).max(100),
+  data_quality: z.number().min(0).max(100),
+});
+
+export const PantryHealthScoreSchema = z.object({
+  householdId: IdSchema,
+  asOf: z.iso.datetime(),
+  score: z.number().min(0).max(100),
+  subscores: PantryHealthSubscoresSchema,
+});
+
+export const PantryHealthHistoryResponseSchema = z.object({
+  householdId: IdSchema,
+  history: z.array(PantryHealthScoreSchema),
+});
+
 export const RecommendationFeedbackRequestSchema = z.object({
   householdId: IdSchema,
   signalType: FeedbackSignalTypeSchema,
@@ -517,6 +537,9 @@ export type ShoppingDraftGenerateRequest = z.infer<typeof ShoppingDraftGenerateR
 export type ShoppingDraftPatchItem = z.infer<typeof ShoppingDraftPatchItemSchema>;
 export type ShoppingDraftPatchRequest = z.infer<typeof ShoppingDraftPatchRequestSchema>;
 export type ShoppingDraftResponse = z.infer<typeof ShoppingDraftResponseSchema>;
+export type PantryHealthSubscores = z.infer<typeof PantryHealthSubscoresSchema>;
+export type PantryHealthScore = z.infer<typeof PantryHealthScoreSchema>;
+export type PantryHealthHistoryResponse = z.infer<typeof PantryHealthHistoryResponseSchema>;
 export type RecommendationFeedbackRequest = z.infer<typeof RecommendationFeedbackRequestSchema>;
 export type RecommendationFeedbackRecord = z.infer<typeof RecommendationFeedbackRecordSchema>;
 export type RecommendationFeedbackResponse = z.infer<typeof RecommendationFeedbackResponseSchema>;

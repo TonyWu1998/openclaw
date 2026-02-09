@@ -78,9 +78,9 @@ afterEach(() => {
 });
 
 async function flushMicrotasks(): Promise<void> {
-  await Promise.resolve();
-  await Promise.resolve();
-  await Promise.resolve();
+  for (let iteration = 0; iteration < 8; iteration += 1) {
+    await Promise.resolve();
+  }
 }
 
 describe("home-inventory extension", () => {
@@ -126,6 +126,40 @@ describe("home-inventory extension", () => {
     expect(respond).toHaveBeenCalledWith(true, payload);
   });
 
+  it("refreshes pantry health through gateway method", async () => {
+    const payload = { householdId: "household_main", score: 82.1 };
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(JSON.stringify(payload), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const harness = createHarness({
+      apiBaseUrl: "http://inventory.local",
+      defaultHouseholdId: "household_main",
+    });
+
+    registerHomeInventory(harness.api);
+
+    const method = harness.gatewayMethods.get("inventory.health.refresh");
+    expect(method).toBeDefined();
+
+    const respond = vi.fn();
+    await method?.({
+      params: {},
+      respond,
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(
+      "http://inventory.local/v1/pantry-health/household_main?refresh=1",
+    );
+    expect(respond).toHaveBeenCalledWith(true, payload);
+  });
+
   it("runs scheduler windows once per date and clears timer on stop", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-02-08T08:05:00-08:00"));
@@ -163,19 +197,20 @@ describe("home-inventory extension", () => {
     await service?.start(serviceContext);
     await flushMicrotasks();
 
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(fetchMock.mock.calls.map((call) => String(call[0]))).toEqual([
       "http://inventory.local/v1/recommendations/household_main/daily/generate",
+      "http://inventory.local/v1/pantry-health/household_main?refresh=1",
     ]);
 
     vi.advanceTimersByTime(60_000);
     await flushMicrotasks();
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
 
     await service?.stop?.(serviceContext);
 
     vi.advanceTimersByTime(60_000);
     await flushMicrotasks();
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 });

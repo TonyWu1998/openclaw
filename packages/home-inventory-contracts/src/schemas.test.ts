@@ -15,6 +15,8 @@ import {
   MealCheckinPendingResponseSchema,
   MealCheckinSubmitRequestSchema,
   MealCheckinSubmitResponseSchema,
+  PantryHealthHistoryResponseSchema,
+  PantryHealthScoreSchema,
   ShoppingDraftGenerateRequestSchema,
   ShoppingDraftPatchRequestSchema,
   ShoppingDraftResponseSchema,
@@ -496,5 +498,27 @@ describe("home inventory contract schemas", () => {
       updated: true,
     });
     expect(response.draft.items[0]?.priceAlert).toBe(false);
+  });
+
+  it("validates pantry health score and history payloads", () => {
+    const latest = PantryHealthScoreSchema.parse({
+      householdId: "household_1",
+      asOf: "2026-02-09T12:00:00.000Z",
+      score: 78.5,
+      subscores: {
+        stock_balance: 80,
+        expiry_risk: 76,
+        waste_pressure: 72,
+        plan_adherence: 84,
+        data_quality: 79,
+      },
+    });
+    expect(latest.score).toBe(78.5);
+
+    const history = PantryHealthHistoryResponseSchema.parse({
+      householdId: "household_1",
+      history: [latest],
+    });
+    expect(history.history).toHaveLength(1);
   });
 });

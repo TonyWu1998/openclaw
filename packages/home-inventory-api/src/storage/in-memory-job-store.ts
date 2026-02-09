@@ -19,6 +19,8 @@ import type {
   MealCheckinPendingResponse,
   MealCheckinSubmitRequest,
   MealCheckinSubmitResponse,
+  PantryHealthHistoryResponse,
+  PantryHealthScore,
   RecommendationFeedbackRecord,
   RecommendationFeedbackRequest,
   RecommendationRun,
@@ -45,6 +47,7 @@ import {
   resolveLotExpirySource,
   riskLevelFromDaysRemaining,
 } from "../domain/expiry-intelligence.js";
+import { computePantryHealthScore } from "../domain/pantry-health.js";
 import {
   createRecommendationPlannerFromEnv,
   type RecommendationPlanner,
@@ -97,6 +100,7 @@ export class InMemoryJobStore implements ReceiptJobStore {
   private readonly shoppingDrafts = new Map<string, ShoppingDraft>();
   private readonly latestShoppingDraftByHousehold = new Map<string, string>();
   private readonly shoppingDraftPatchIdempotency = new Map<string, Set<string>>();
+  private readonly pantryHealthHistory = new Map<string, PantryHealthScore[]>();
   private readonly feedbackRecords: RecommendationFeedbackRecord[] = [];
   private readonly recommendationIndex = new Map<
     string,
@@ -919,6 +923,45 @@ export class InMemoryJobStore implements ReceiptJobStore {
     return {
       draft: clone(draft),
       updated: true,
+    };
+  }
+
+  refreshPantryHealth(householdId: string): PantryHealthScore {
+    const checkins = (this.mealCheckinsByHousehold.get(householdId) ?? [])
+      .map((checkinId) => this.mealCheckins.get(checkinId))
+      .filter((checkin): checkin is MealCheckin => Boolean(checkin));
+
+    const score = computePantryHealthScore({
+      householdId,
+      inventory: this.getInventory(householdId),
+      expiryRisk: this.getExpiryRisk(householdId),
+      checkins,
+    });
+
+    const history = this.pantryHealthHistory.get(householdId) ?? [];
+    const scoreDay = score.asOf.slice(0, 10);
+    const existingIndex = history.findIndex((entry) => entry.asOf.slice(0, 10) === scoreDay);
+    if (existingIndex >= 0) {
+      history[existingIndex] = score;
+    } else {
+      history.push(score);
+    }
+
+    const sortedHistory = history.toSorted((a, b) => b.asOf.localeCompare(a.asOf));
+    this.pantryHealthHistory.set(householdId, sortedHistory);
+    return clone(score);
+  }
+
+  getLatestPantryHealth(householdId: string): PantryHealthScore | null {
+    const history = this.pantryHealthHistory.get(householdId) ?? [];
+    const latest = history[0];
+    return latest ? clone(latest) : null;
+  }
+
+  getPantryHealthHistory(householdId: string): PantryHealthHistoryResponse {
+    return {
+      householdId,
+      history: clone(this.pantryHealthHistory.get(householdId) ?? []),
     };
   }
 

@@ -766,6 +766,27 @@ describe("home inventory api", () => {
     expect(latestResponse.status).toBe(200);
     const latestPayload = (await latestResponse.json()) as { draft: { status: string } };
     expect(latestPayload.draft.status).toBe("finalized");
+
+    const healthLatestResponse = await fetch(
+      `${baseUrl}/v1/pantry-health/household_shopping?refresh=1`,
+    );
+    expect(healthLatestResponse.status).toBe(200);
+    const healthLatestPayload = (await healthLatestResponse.json()) as {
+      score: number;
+      subscores: Record<string, number>;
+    };
+    expect(healthLatestPayload.score).toBeGreaterThanOrEqual(0);
+    expect(healthLatestPayload.score).toBeLessThanOrEqual(100);
+    expect(Object.keys(healthLatestPayload.subscores)).toHaveLength(5);
+
+    const healthHistoryResponse = await fetch(
+      `${baseUrl}/v1/pantry-health/household_shopping/history`,
+    );
+    expect(healthHistoryResponse.status).toBe(200);
+    const healthHistoryPayload = (await healthHistoryResponse.json()) as {
+      history: Array<{ score: number }>;
+    };
+    expect(healthHistoryPayload.history.length).toBeGreaterThan(0);
   });
 
   it("returns 404 when overriding expiry on unknown lot", async () => {

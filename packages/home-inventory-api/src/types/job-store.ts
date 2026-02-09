@@ -15,6 +15,8 @@ import type {
   MealCheckinPendingResponse,
   MealCheckinSubmitRequest,
   MealCheckinSubmitResponse,
+  PantryHealthHistoryResponse,
+  PantryHealthScore,
   RecommendationFeedbackRecord,
   RecommendationFeedbackRequest,
   ShoppingDraftGenerateRequest,
@@ -80,6 +82,9 @@ export type ReceiptJobStore = {
     request: ShoppingDraftPatchRequest,
   ) => ShoppingDraftResponse | null;
   finalizeShoppingDraft: (draftId: string) => ShoppingDraftResponse | null;
+  refreshPantryHealth: (householdId: string) => PantryHealthScore;
+  getLatestPantryHealth: (householdId: string) => PantryHealthScore | null;
+  getPantryHealthHistory: (householdId: string) => PantryHealthHistoryResponse;
   generateDailyRecommendations: (
     householdId: string,
     request: GenerateDailyRecommendationsRequest,

@@ -69,6 +69,7 @@ export const ReceiptUploadRecordSchema = z.object({
   merchantName: z.string().min(1).max(120).optional(),
   purchasedAt: z.iso.datetime().optional(),
   ocrText: z.string().max(20000).optional(),
+  receiptImageDataUrl: z.string().startsWith("data:image/").max(3_000_000).optional(),
   items: z.array(ReceiptItemSchema).optional(),
 });
 
@@ -79,6 +80,7 @@ export const ReceiptDetailsResponseSchema = z.object({
 export const ReceiptProcessRequestSchema = z.object({
   householdId: IdSchema,
   ocrText: z.string().min(1).max(20000).optional(),
+  receiptImageDataUrl: z.string().startsWith("data:image/").max(3_000_000).optional(),
   merchantName: z.string().min(1).max(120).optional(),
   purchasedAt: z.iso.datetime().optional(),
 });

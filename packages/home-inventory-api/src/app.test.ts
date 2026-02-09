@@ -104,6 +104,7 @@ describe("home inventory api", () => {
         body: JSON.stringify({
           householdId: "household_main",
           ocrText: "Jasmine Rice 2kg\nTomato x4",
+          receiptImageDataUrl: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAAB",
           merchantName: "Fresh Market",
           purchasedAt: "2026-02-08T12:00:00.000Z",
         }),
@@ -127,10 +128,14 @@ describe("home inventory api", () => {
 
     expect(claimResponse.status).toBe(200);
     const claimPayload = (await claimResponse.json()) as {
-      job: { job: { jobId: string; status: string }; receipt: { ocrText?: string } } | null;
+      job: {
+        job: { jobId: string; status: string };
+        receipt: { ocrText?: string; receiptImageDataUrl?: string };
+      } | null;
     };
     expect(claimPayload.job?.job.status).toBe("processing");
     expect(claimPayload.job?.receipt.ocrText).toContain("Jasmine Rice");
+    expect(claimPayload.job?.receipt.receiptImageDataUrl?.startsWith("data:image/")).toBe(true);
 
     const resultResponse = await fetch(
       `${baseUrl}/internal/jobs/${enqueuePayload.job.jobId}/result`,

@@ -3,6 +3,7 @@ import type { ItemCategory, ReceiptItem, Unit } from "@openclaw/home-inventory-c
 export type ReceiptExtractionInput = {
   ocrText: string;
   merchantName?: string;
+  receiptImageDataUrl?: string;
 };
 
 export type DraftReceiptItem = {

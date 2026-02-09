@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   ClaimJobResponseSchema,
   DailyRecommendationsResponseSchema,
+  ReceiptProcessRequestSchema,
   JobStatusResponseSchema,
   JobResultRequestSchema,
   JobStatusSchema,
@@ -74,6 +75,16 @@ describe("home inventory contract schemas", () => {
     });
 
     expect(parsed.items[0]?.itemKey).toBe("rice");
+  });
+
+  it("accepts vision-ready receipt processing input", () => {
+    const parsed = ReceiptProcessRequestSchema.parse({
+      householdId: "household_1",
+      receiptImageDataUrl: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAAB",
+      merchantName: "Vision Market",
+    });
+
+    expect(parsed.receiptImageDataUrl?.startsWith("data:image/")).toBe(true);
   });
 
   it("validates receipt details with parsed items", () => {

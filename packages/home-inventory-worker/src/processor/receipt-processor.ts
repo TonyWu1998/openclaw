@@ -32,13 +32,17 @@ export class PhaseTwoReceiptProcessor implements ReceiptProcessor {
 
   async process(claimedJob: ClaimedJob): Promise<JobResultRequest> {
     const ocrText = claimedJob.receipt.ocrText?.trim() ?? "";
-    if (ocrText.length === 0) {
-      throw new Error(`receipt ${claimedJob.receipt.receiptUploadId} has no OCR text`);
+    const receiptImageDataUrl = claimedJob.receipt.receiptImageDataUrl?.trim();
+    if (ocrText.length === 0 && !receiptImageDataUrl) {
+      throw new Error(
+        `receipt ${claimedJob.receipt.receiptUploadId} has neither OCR text nor image data`,
+      );
     }
 
     const extractionInput = {
       ocrText,
       merchantName: claimedJob.receipt.merchantName,
+      receiptImageDataUrl,
     };
 
     let drafts;
@@ -59,7 +63,7 @@ export class PhaseTwoReceiptProcessor implements ReceiptProcessor {
     return JobResultRequestSchema.parse({
       merchantName: claimedJob.receipt.merchantName,
       purchasedAt: claimedJob.receipt.purchasedAt,
-      ocrText,
+      ocrText: ocrText.length > 0 ? ocrText : undefined,
       items: normalizedItems,
       notes: `phase2 extracted ${normalizedItems.length} normalized receipt items`,
     });

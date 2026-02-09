@@ -15,6 +15,9 @@ import {
   MealCheckinPendingResponseSchema,
   MealCheckinSubmitRequestSchema,
   MealCheckinSubmitResponseSchema,
+  ShoppingDraftGenerateRequestSchema,
+  ShoppingDraftPatchRequestSchema,
+  ShoppingDraftResponseSchema,
   RecommendationFeedbackRequestSchema,
   ReceiptProcessRequestSchema,
   ReceiptReviewRequestSchema,
@@ -438,5 +441,60 @@ describe("home inventory contract schemas", () => {
       ],
     });
     expect(parsed.checkins).toHaveLength(1);
+  });
+
+  it("validates shopping draft generation, patch, and response payloads", () => {
+    const generate = ShoppingDraftGenerateRequestSchema.parse({
+      weekOf: "2026-02-09",
+      regenerate: true,
+    });
+    expect(generate.regenerate).toBe(true);
+
+    const patch = ShoppingDraftPatchRequestSchema.parse({
+      householdId: "household_1",
+      items: [
+        {
+          draftItemId: "draft_item_1",
+          quantity: 2,
+          priority: "high",
+          itemStatus: "planned",
+          notes: "buy on sale",
+        },
+      ],
+      idempotencyKey: "draft-patch-1",
+    });
+    expect(patch.items[0]?.priority).toBe("high");
+
+    const response = ShoppingDraftResponseSchema.parse({
+      draft: {
+        draftId: "draft_1",
+        householdId: "household_1",
+        weekOf: "2026-02-09",
+        status: "draft",
+        sourceRunId: "run_1",
+        items: [
+          {
+            draftItemId: "draft_item_1",
+            recommendationId: "rec_1",
+            itemKey: "milk",
+            itemName: "Whole Milk",
+            quantity: 2,
+            unit: "l",
+            priority: "high",
+            rationale: "Low stock and used daily.",
+            itemStatus: "planned",
+            lastUnitPrice: 2.7,
+            avgUnitPrice30d: 2.5,
+            minUnitPrice90d: 2.2,
+            priceTrendPct: 8,
+            priceAlert: false,
+          },
+        ],
+        createdAt: "2026-02-09T12:00:00.000Z",
+        updatedAt: "2026-02-09T12:30:00.000Z",
+      },
+      updated: true,
+    });
+    expect(response.draft.items[0]?.priceAlert).toBe(false);
   });
 });

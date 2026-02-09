@@ -17,6 +17,9 @@ import type {
   MealCheckinSubmitResponse,
   RecommendationFeedbackRecord,
   RecommendationFeedbackRequest,
+  ShoppingDraftGenerateRequest,
+  ShoppingDraftPatchRequest,
+  ShoppingDraftResponse,
   ReceiptDetailsResponse,
   ReceiptProcessJob,
   ReceiptProcessRequest,
@@ -67,6 +70,16 @@ export type ReceiptJobStore = {
     checkinId: string,
     request: MealCheckinSubmitRequest,
   ) => MealCheckinSubmitResponse | null;
+  generateShoppingDraft: (
+    householdId: string,
+    request: ShoppingDraftGenerateRequest,
+  ) => Promise<ShoppingDraftResponse>;
+  getLatestShoppingDraft: (householdId: string) => ShoppingDraftResponse | null;
+  patchShoppingDraftItems: (
+    draftId: string,
+    request: ShoppingDraftPatchRequest,
+  ) => ShoppingDraftResponse | null;
+  finalizeShoppingDraft: (draftId: string) => ShoppingDraftResponse | null;
   generateDailyRecommendations: (
     householdId: string,
     request: GenerateDailyRecommendationsRequest,

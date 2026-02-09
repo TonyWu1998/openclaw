@@ -31,6 +31,10 @@ import type {
   ReceiptReviewResponse,
   ReceiptUploadRequest,
   ReceiptUploadResponse,
+  ShoppingDraft,
+  ShoppingDraftGenerateRequest,
+  ShoppingDraftPatchRequest,
+  ShoppingDraftResponse,
   WeeklyRecommendationsResponse,
 } from "@openclaw/home-inventory-contracts";
 import { randomUUID } from "node:crypto";
@@ -45,6 +49,10 @@ import {
   createRecommendationPlannerFromEnv,
   type RecommendationPlanner,
 } from "../domain/recommendation-planner.js";
+import {
+  computePriceIntelligence,
+  type PricePoint,
+} from "../domain/shopping-price-intelligence.js";
 
 type InMemoryJobStoreOptions = {
   uploadOrigin?: string;
@@ -86,6 +94,9 @@ export class InMemoryJobStore implements ReceiptJobStore {
   private readonly mealCheckins = new Map<string, MealCheckin>();
   private readonly mealCheckinsByHousehold = new Map<string, string[]>();
   private readonly mealCheckinSubmitIdempotency = new Map<string, Set<string>>();
+  private readonly shoppingDrafts = new Map<string, ShoppingDraft>();
+  private readonly latestShoppingDraftByHousehold = new Map<string, string>();
+  private readonly shoppingDraftPatchIdempotency = new Map<string, Set<string>>();
   private readonly feedbackRecords: RecommendationFeedbackRecord[] = [];
   private readonly recommendationIndex = new Map<
     string,
@@ -740,6 +751,177 @@ export class InMemoryJobStore implements ReceiptJobStore {
     };
   }
 
+  async generateShoppingDraft(
+    householdId: string,
+    request: ShoppingDraftGenerateRequest,
+  ): Promise<ShoppingDraftResponse> {
+    const weekOf = request.weekOf ?? todayIsoDate();
+    const latestId = this.latestShoppingDraftByHousehold.get(householdId);
+    if (latestId && !request.regenerate) {
+      const latest = this.shoppingDrafts.get(latestId);
+      if (latest && latest.weekOf === weekOf) {
+        return {
+          draft: clone(latest),
+          updated: false,
+        };
+      }
+    }
+
+    let weekly = this.weeklyRecommendations.get(householdId);
+    if (!weekly || weekly.run.targetDate !== weekOf) {
+      weekly = await this.generateWeeklyRecommendations(householdId, { weekOf });
+    }
+
+    const now = nowIso();
+    const draft: ShoppingDraft = {
+      draftId: `draft_${randomUUID()}`,
+      householdId,
+      weekOf,
+      status: "draft",
+      sourceRunId: weekly.run.runId,
+      items: weekly.recommendations.map((recommendation) => {
+        const priceIntel = computePriceIntelligence(
+          this.collectPricePoints(householdId, recommendation.itemKey),
+          now,
+        );
+
+        return {
+          draftItemId: `draft_item_${randomUUID()}`,
+          recommendationId: recommendation.recommendationId,
+          itemKey: recommendation.itemKey,
+          itemName: recommendation.itemName,
+          quantity: recommendation.quantity,
+          unit: recommendation.unit,
+          priority: recommendation.priority,
+          rationale: recommendation.rationale,
+          itemStatus: "planned",
+          lastUnitPrice: priceIntel.lastUnitPrice,
+          avgUnitPrice30d: priceIntel.avgUnitPrice30d,
+          minUnitPrice90d: priceIntel.minUnitPrice90d,
+          priceTrendPct: priceIntel.priceTrendPct,
+          priceAlert: priceIntel.priceAlert,
+        };
+      }),
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    this.shoppingDrafts.set(draft.draftId, draft);
+    this.latestShoppingDraftByHousehold.set(householdId, draft.draftId);
+    return {
+      draft: clone(draft),
+      updated: true,
+    };
+  }
+
+  getLatestShoppingDraft(householdId: string): ShoppingDraftResponse | null {
+    const latestId = this.latestShoppingDraftByHousehold.get(householdId);
+    if (!latestId) {
+      return null;
+    }
+
+    const draft = this.shoppingDrafts.get(latestId);
+    if (!draft) {
+      return null;
+    }
+
+    return { draft: clone(draft) };
+  }
+
+  patchShoppingDraftItems(
+    draftId: string,
+    request: ShoppingDraftPatchRequest,
+  ): ShoppingDraftResponse | null {
+    const draft = this.shoppingDrafts.get(draftId);
+    if (!draft || draft.householdId !== request.householdId) {
+      return null;
+    }
+
+    if (
+      request.idempotencyKey &&
+      this.hasIdempotencyKey(this.shoppingDraftPatchIdempotency, draftId, request.idempotencyKey)
+    ) {
+      return {
+        draft: clone(draft),
+        updated: false,
+      };
+    }
+
+    if (draft.status === "finalized") {
+      return {
+        draft: clone(draft),
+        updated: false,
+      };
+    }
+
+    let updated = false;
+    for (const patchItem of request.items) {
+      const item = draft.items.find((entry) => entry.draftItemId === patchItem.draftItemId);
+      if (!item) {
+        continue;
+      }
+      if (patchItem.quantity !== undefined && patchItem.quantity !== item.quantity) {
+        item.quantity = patchItem.quantity;
+        updated = true;
+      }
+      if (patchItem.priority !== undefined && patchItem.priority !== item.priority) {
+        item.priority = patchItem.priority;
+        updated = true;
+      }
+      if (patchItem.itemStatus !== undefined && patchItem.itemStatus !== item.itemStatus) {
+        item.itemStatus = patchItem.itemStatus;
+        updated = true;
+      }
+      if (patchItem.notes !== undefined && patchItem.notes !== item.notes) {
+        item.notes = patchItem.notes;
+        updated = true;
+      }
+    }
+
+    if (updated) {
+      draft.updatedAt = nowIso();
+    }
+    this.shoppingDrafts.set(draftId, draft);
+
+    if (request.idempotencyKey) {
+      this.registerIdempotencyKey(
+        this.shoppingDraftPatchIdempotency,
+        draftId,
+        request.idempotencyKey,
+      );
+    }
+
+    return {
+      draft: clone(draft),
+      updated,
+    };
+  }
+
+  finalizeShoppingDraft(draftId: string): ShoppingDraftResponse | null {
+    const draft = this.shoppingDrafts.get(draftId);
+    if (!draft) {
+      return null;
+    }
+
+    if (draft.status === "finalized") {
+      return {
+        draft: clone(draft),
+        updated: false,
+      };
+    }
+
+    const now = nowIso();
+    draft.status = "finalized";
+    draft.finalizedAt = now;
+    draft.updatedAt = now;
+    this.shoppingDrafts.set(draftId, draft);
+
+    return {
+      draft: clone(draft),
+      updated: true,
+    };
+  }
+
   async generateDailyRecommendations(
     householdId: string,
     request: GenerateDailyRecommendationsRequest,
@@ -1007,6 +1189,33 @@ export class InMemoryJobStore implements ReceiptJobStore {
     }
 
     return result;
+  }
+
+  private collectPricePoints(householdId: string, itemKey: string): PricePoint[] {
+    const points: PricePoint[] = [];
+
+    for (const receipt of this.uploads.values()) {
+      if (receipt.householdId !== householdId) {
+        continue;
+      }
+
+      const purchasedAt = receipt.purchasedAt ?? receipt.updatedAt ?? receipt.createdAt;
+      for (const item of receipt.items ?? []) {
+        if (item.itemKey !== itemKey) {
+          continue;
+        }
+        const unitPrice = resolveUnitPrice(item);
+        if (unitPrice === undefined) {
+          continue;
+        }
+        points.push({
+          purchasedAt,
+          unitPrice,
+        });
+      }
+    }
+
+    return points;
   }
 
   private applyInventoryMutations(
@@ -1306,6 +1515,23 @@ function normalizeErrorMessage(error: unknown): string {
     return error.message;
   }
   return String(error);
+}
+
+function resolveUnitPrice(item: ReceiptItem): number | undefined {
+  if (typeof item.unitPrice === "number" && Number.isFinite(item.unitPrice) && item.unitPrice > 0) {
+    return Number.parseFloat(item.unitPrice.toFixed(3));
+  }
+
+  if (
+    typeof item.lineTotal === "number" &&
+    Number.isFinite(item.lineTotal) &&
+    item.lineTotal > 0 &&
+    item.quantity > 0
+  ) {
+    return Number.parseFloat((item.lineTotal / item.quantity).toFixed(3));
+  }
+
+  return undefined;
 }
 
 function defaultSignalValue(signalType: RecommendationFeedbackRequest["signalType"]): number {

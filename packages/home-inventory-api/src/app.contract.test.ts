@@ -17,6 +17,7 @@ import {
   ReceiptReviewResponseSchema,
   ReceiptUploadResponseSchema,
   RecommendationFeedbackResponseSchema,
+  ShoppingDraftResponseSchema,
   WeeklyRecommendationsResponseSchema,
 } from "@openclaw/home-inventory-contracts";
 import { afterEach, describe, expect, it } from "vitest";
@@ -346,6 +347,71 @@ describe("home inventory API public contracts", () => {
       await weeklyGenerateResponse.json(),
     );
     expect(weeklyGenerated.run.runType).toBe("weekly");
+
+    const shoppingDraftGenerateResponse = await fetch(
+      `${baseUrl}/v1/shopping-drafts/household_contract/generate`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ weekOf: "2026-02-09" }),
+      },
+    );
+    const shoppingDraftGenerated = ShoppingDraftResponseSchema.parse(
+      await shoppingDraftGenerateResponse.json(),
+    );
+    expect(shoppingDraftGenerated.draft.items.length).toBe(weeklyGenerated.recommendations.length);
+    expect(
+      shoppingDraftGenerated.draft.items.every((item) => typeof item.priceAlert === "boolean"),
+    ).toBe(true);
+
+    const shoppingDraftLatestResponse = await fetch(
+      `${baseUrl}/v1/shopping-drafts/household_contract/latest`,
+    );
+    const shoppingDraftLatest = ShoppingDraftResponseSchema.parse(
+      await shoppingDraftLatestResponse.json(),
+    );
+    expect(shoppingDraftLatest.draft.draftId).toBe(shoppingDraftGenerated.draft.draftId);
+
+    const firstDraftItem = shoppingDraftGenerated.draft.items[0];
+    expect(firstDraftItem).toBeDefined();
+    if (!firstDraftItem) {
+      throw new Error("expected shopping draft item");
+    }
+
+    const shoppingDraftPatchedResponse = await fetch(
+      `${baseUrl}/v1/shopping-drafts/${shoppingDraftGenerated.draft.draftId}/items`,
+      {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          householdId: "household_contract",
+          idempotencyKey: "draft-contract-patch-1",
+          items: [
+            {
+              draftItemId: firstDraftItem.draftItemId,
+              quantity: firstDraftItem.quantity + 1,
+              notes: "adjusted in contract test",
+            },
+          ],
+        }),
+      },
+    );
+    const shoppingDraftPatched = ShoppingDraftResponseSchema.parse(
+      await shoppingDraftPatchedResponse.json(),
+    );
+    expect(shoppingDraftPatched.updated).toBe(true);
+
+    const shoppingDraftFinalizedResponse = await fetch(
+      `${baseUrl}/v1/shopping-drafts/${shoppingDraftGenerated.draft.draftId}/finalize`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+      },
+    );
+    const shoppingDraftFinalized = ShoppingDraftResponseSchema.parse(
+      await shoppingDraftFinalizedResponse.json(),
+    );
+    expect(shoppingDraftFinalized.draft.status).toBe("finalized");
 
     const weeklyReadResponse = await fetch(
       `${baseUrl}/v1/recommendations/household_contract/weekly`,

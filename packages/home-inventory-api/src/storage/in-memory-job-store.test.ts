@@ -629,3 +629,141 @@ describe("InMemoryJobStore phase5c meal checkins", () => {
     );
   });
 });
+
+describe("InMemoryJobStore phase5e shopping drafts", () => {
+  it("generates shopping draft items from weekly recommendations with price fields", async () => {
+    const householdId = "household_shopping_draft";
+    const planner: RecommendationPlanner = {
+      generateDaily: async () => ({ model: "planner/mock-v1", recommendations: [] }),
+      generateWeekly: async () => ({
+        model: "planner/mock-v1",
+        recommendations: [
+          {
+            itemKey: "milk",
+            itemName: "Whole Milk",
+            quantity: 2,
+            unit: "l",
+            priority: "high",
+            rationale: "Milk is frequently consumed.",
+            score: 0.85,
+          },
+        ],
+      }),
+    };
+
+    const store = new InMemoryJobStore({ recommendationPlanner: planner });
+
+    const upload = store.createUpload({
+      householdId,
+      filename: "milk-prices.jpg",
+      contentType: "image/jpeg",
+    });
+    const job = store.enqueueJob({
+      householdId,
+      receiptUploadId: upload.receiptUploadId,
+      request: {
+        householdId,
+        ocrText: "Milk 2L",
+        purchasedAt: "2026-02-08T12:00:00.000Z",
+      },
+    });
+    store.submitJobResult(job.jobId, {
+      purchasedAt: "2026-02-08T12:00:00.000Z",
+      items: [
+        {
+          itemKey: "milk",
+          rawName: "Whole Milk",
+          normalizedName: "whole milk",
+          quantity: 2,
+          unit: "l",
+          category: "dairy",
+          confidence: 0.9,
+          unitPrice: 2.7,
+        },
+      ],
+    });
+
+    await store.generateWeeklyRecommendations(householdId, { weekOf: "2026-02-09" });
+    const generated = await store.generateShoppingDraft(householdId, { weekOf: "2026-02-09" });
+
+    expect(generated.updated).toBe(true);
+    expect(generated.draft.items).toHaveLength(1);
+    expect(generated.draft.items[0]?.itemKey).toBe("milk");
+    expect(generated.draft.items[0]?.lastUnitPrice).toBe(2.7);
+    expect(typeof generated.draft.items[0]?.priceAlert).toBe("boolean");
+  });
+
+  it("patches and finalizes shopping drafts with idempotent updates", async () => {
+    const householdId = "household_shopping_patch";
+    const planner: RecommendationPlanner = {
+      generateDaily: async () => ({ model: "planner/mock-v1", recommendations: [] }),
+      generateWeekly: async () => ({
+        model: "planner/mock-v1",
+        recommendations: [
+          {
+            itemKey: "tomato",
+            itemName: "Tomato",
+            quantity: 4,
+            unit: "count",
+            priority: "medium",
+            rationale: "Required for meals this week.",
+            score: 0.72,
+          },
+        ],
+      }),
+    };
+
+    const store = new InMemoryJobStore({ recommendationPlanner: planner });
+    await store.generateWeeklyRecommendations(householdId, { weekOf: "2026-02-09" });
+    const generated = await store.generateShoppingDraft(householdId, { weekOf: "2026-02-09" });
+    const draftId = generated.draft.draftId;
+    const itemId = generated.draft.items[0]?.draftItemId;
+    expect(itemId).toBeDefined();
+    if (!itemId) {
+      throw new Error("expected shopping draft item");
+    }
+
+    const patchedOne = store.patchShoppingDraftItems(draftId, {
+      householdId,
+      idempotencyKey: "draft-patch-1",
+      items: [
+        {
+          draftItemId: itemId,
+          quantity: 5,
+          itemStatus: "planned",
+          notes: "adjusted quantity",
+        },
+      ],
+    });
+    expect(patchedOne?.updated).toBe(true);
+    expect(patchedOne?.draft.items[0]?.quantity).toBe(5);
+
+    const patchedTwo = store.patchShoppingDraftItems(draftId, {
+      householdId,
+      idempotencyKey: "draft-patch-1",
+      items: [
+        {
+          draftItemId: itemId,
+          quantity: 5,
+        },
+      ],
+    });
+    expect(patchedTwo?.updated).toBe(false);
+
+    const finalized = store.finalizeShoppingDraft(draftId);
+    expect(finalized?.updated).toBe(true);
+    expect(finalized?.draft.status).toBe("finalized");
+
+    const patchAfterFinalize = store.patchShoppingDraftItems(draftId, {
+      householdId,
+      items: [
+        {
+          draftItemId: itemId,
+          quantity: 6,
+        },
+      ],
+    });
+    expect(patchAfterFinalize?.updated).toBe(false);
+    expect(patchAfterFinalize?.draft.items[0]?.quantity).toBe(5);
+  });
+});

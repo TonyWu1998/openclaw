@@ -214,6 +214,31 @@ export default function register(api: OpenClawPluginApi) {
     }
   });
 
+  api.registerGatewayMethod("inventory.health.refresh", async ({ params, respond }) => {
+    const householdId = stringParam(params, "householdId") ?? config.defaultHouseholdId;
+    if (!householdId) {
+      respond(false, undefined, {
+        code: "INVALID_REQUEST",
+        message: "householdId is required",
+      });
+      return;
+    }
+
+    try {
+      const payload = await request({
+        method: "GET",
+        path: `/v1/pantry-health/${encodeURIComponent(householdId)}?refresh=1`,
+      });
+
+      respond(true, payload);
+    } catch (error) {
+      respond(false, undefined, {
+        code: "UNAVAILABLE",
+        message: `inventory.health.refresh failed: ${error instanceof Error ? error.message : String(error)}`,
+      });
+    }
+  });
+
   api.registerGatewayMethod("inventory.recommendation.feedback", async ({ params, respond }) => {
     const recommendationId = stringParam(params, "recommendationId");
     const householdId = stringParam(params, "householdId") ?? config.defaultHouseholdId;
@@ -272,6 +297,10 @@ export default function register(api: OpenClawPluginApi) {
               path: `/v1/recommendations/${encodeURIComponent(config.defaultHouseholdId!)}/daily/generate`,
               body: { date },
             });
+            await request({
+              method: "GET",
+              path: `/v1/pantry-health/${encodeURIComponent(config.defaultHouseholdId!)}?refresh=1`,
+            });
             logger.info(`home-inventory daily schedule ran for ${config.defaultHouseholdId}`);
           } catch (error) {
             logger.warn(`home-inventory daily schedule failed: ${String(error)}`);
@@ -290,6 +319,10 @@ export default function register(api: OpenClawPluginApi) {
               method: "POST",
               path: `/v1/recommendations/${encodeURIComponent(config.defaultHouseholdId!)}/weekly/generate`,
               body: { weekOf: date },
+            });
+            await request({
+              method: "GET",
+              path: `/v1/pantry-health/${encodeURIComponent(config.defaultHouseholdId!)}?refresh=1`,
             });
             logger.info(`home-inventory weekly schedule ran for ${config.defaultHouseholdId}`);
           } catch (error) {

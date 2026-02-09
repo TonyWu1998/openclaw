@@ -22,6 +22,8 @@ import {
   MealCheckinPendingResponseSchema,
   MealCheckinSubmitRequestSchema,
   MealCheckinSubmitResponseSchema,
+  PantryHealthHistoryResponseSchema,
+  PantryHealthScoreSchema,
   RecommendationFeedbackRequestSchema,
   RecommendationFeedbackResponseSchema,
   ShoppingDraftGenerateRequestSchema,
@@ -316,6 +318,34 @@ export function createApp(params: CreateAppParams): Express {
     }
 
     res.json(ShoppingDraftResponseSchema.parse(response));
+  });
+
+  app.get("/v1/pantry-health/:householdId", (req, res) => {
+    const householdId = parseParam(req.params.householdId, "householdId", res);
+    if (!householdId) {
+      return;
+    }
+
+    const refreshParam = req.query.refresh;
+    const refreshRequested =
+      refreshParam === "1" || refreshParam === "true" || refreshParam === true;
+
+    const score = refreshRequested
+      ? params.store.refreshPantryHealth(householdId)
+      : (params.store.getLatestPantryHealth(householdId) ??
+        params.store.refreshPantryHealth(householdId));
+
+    res.json(PantryHealthScoreSchema.parse(score));
+  });
+
+  app.get("/v1/pantry-health/:householdId/history", (req, res) => {
+    const householdId = parseParam(req.params.householdId, "householdId", res);
+    if (!householdId) {
+      return;
+    }
+
+    const response = params.store.getPantryHealthHistory(householdId);
+    res.json(PantryHealthHistoryResponseSchema.parse(response));
   });
 
   app.get("/v1/recommendations/:householdId/daily", (req, res) => {

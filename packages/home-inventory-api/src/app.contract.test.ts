@@ -13,6 +13,8 @@ import {
   ManualInventoryEntryResponseSchema,
   MealCheckinPendingResponseSchema,
   MealCheckinSubmitResponseSchema,
+  PantryHealthHistoryResponseSchema,
+  PantryHealthScoreSchema,
   ReceiptDetailsResponseSchema,
   ReceiptReviewResponseSchema,
   ReceiptUploadResponseSchema,
@@ -412,6 +414,23 @@ describe("home inventory API public contracts", () => {
       await shoppingDraftFinalizedResponse.json(),
     );
     expect(shoppingDraftFinalized.draft.status).toBe("finalized");
+
+    const pantryHealthLatestResponse = await fetch(
+      `${baseUrl}/v1/pantry-health/household_contract?refresh=1`,
+    );
+    const pantryHealthLatest = PantryHealthScoreSchema.parse(
+      await pantryHealthLatestResponse.json(),
+    );
+    expect(pantryHealthLatest.score).toBeGreaterThanOrEqual(0);
+    expect(pantryHealthLatest.score).toBeLessThanOrEqual(100);
+
+    const pantryHealthHistoryResponse = await fetch(
+      `${baseUrl}/v1/pantry-health/household_contract/history`,
+    );
+    const pantryHealthHistory = PantryHealthHistoryResponseSchema.parse(
+      await pantryHealthHistoryResponse.json(),
+    );
+    expect(pantryHealthHistory.history.length).toBeGreaterThan(0);
 
     const weeklyReadResponse = await fetch(
       `${baseUrl}/v1/recommendations/household_contract/weekly`,

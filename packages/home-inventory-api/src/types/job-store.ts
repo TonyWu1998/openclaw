@@ -10,6 +10,9 @@ import type {
   LotExpiryOverrideResponse,
   ManualInventoryEntryRequest,
   ManualInventoryEntryResponse,
+  MealCheckinPendingResponse,
+  MealCheckinSubmitRequest,
+  MealCheckinSubmitResponse,
   RecommendationFeedbackRecord,
   RecommendationFeedbackRequest,
   ReceiptDetailsResponse,
@@ -56,6 +59,11 @@ export type ReceiptJobStore = {
     request: LotExpiryOverrideRequest,
   ) => LotExpiryOverrideResponse | null;
   getExpiryRisk: (householdId: string) => ExpiryRiskResponse;
+  listPendingCheckins: (householdId: string) => MealCheckinPendingResponse;
+  submitMealCheckin: (
+    checkinId: string,
+    request: MealCheckinSubmitRequest,
+  ) => MealCheckinSubmitResponse | null;
   generateDailyRecommendations: (
     householdId: string,
     request: GenerateDailyRecommendationsRequest,

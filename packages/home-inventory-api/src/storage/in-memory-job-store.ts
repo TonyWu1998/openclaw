@@ -12,6 +12,11 @@ import type {
   LotExpiryOverrideResponse,
   ManualInventoryEntryRequest,
   ManualInventoryEntryResponse,
+  MealCheckin,
+  MealCheckinLine,
+  MealCheckinPendingResponse,
+  MealCheckinSubmitRequest,
+  MealCheckinSubmitResponse,
   RecommendationFeedbackRecord,
   RecommendationFeedbackRequest,
   RecommendationRun,
@@ -74,6 +79,9 @@ export class InMemoryJobStore implements ReceiptJobStore {
   private readonly inventoryEvents = new Map<string, InventoryEvent[]>();
   private readonly dailyRecommendations = new Map<string, DailyRecommendationsResponse>();
   private readonly weeklyRecommendations = new Map<string, WeeklyRecommendationsResponse>();
+  private readonly mealCheckins = new Map<string, MealCheckin>();
+  private readonly mealCheckinsByHousehold = new Map<string, string[]>();
+  private readonly mealCheckinSubmitIdempotency = new Map<string, Set<string>>();
   private readonly feedbackRecords: RecommendationFeedbackRecord[] = [];
   private readonly recommendationIndex = new Map<
     string,
@@ -512,6 +520,138 @@ export class InMemoryJobStore implements ReceiptJobStore {
     };
   }
 
+  listPendingCheckins(householdId: string): MealCheckinPendingResponse {
+    const checkinIds = this.mealCheckinsByHousehold.get(householdId) ?? [];
+    const checkins = checkinIds
+      .map((checkinId) => this.mealCheckins.get(checkinId))
+      .filter((checkin): checkin is MealCheckin => Boolean(checkin))
+      .filter((checkin) => checkin.status !== "completed")
+      .toSorted((a, b) => a.createdAt.localeCompare(b.createdAt))
+      .map((checkin) => clone(checkin));
+
+    return {
+      householdId,
+      checkins,
+    };
+  }
+
+  submitMealCheckin(
+    checkinId: string,
+    request: MealCheckinSubmitRequest,
+  ): MealCheckinSubmitResponse | null {
+    const existing = this.mealCheckins.get(checkinId);
+    if (!existing || existing.householdId !== request.householdId) {
+      return null;
+    }
+
+    if (
+      request.idempotencyKey &&
+      this.hasIdempotencyKey(this.mealCheckinSubmitIdempotency, checkinId, request.idempotencyKey)
+    ) {
+      return {
+        checkin: clone(existing),
+        inventory: this.getInventory(request.householdId),
+        eventsCreated: 0,
+      };
+    }
+
+    if (existing.status === "completed") {
+      return {
+        checkin: clone(existing),
+        inventory: this.getInventory(request.householdId),
+        eventsCreated: 0,
+      };
+    }
+
+    const lines = normalizeCheckinLines(request.lines ?? []);
+    const hasExplicitQuantities = lines.some(
+      (line) => (line.quantityConsumed ?? 0) > 0 || (line.quantityWasted ?? 0) > 0,
+    );
+    let eventsCreated = 0;
+    let nextStatus: MealCheckin["status"] = "completed";
+
+    if (request.outcome === "skipped") {
+      this.recordRecommendationFeedback(existing.recommendationId, {
+        householdId: request.householdId,
+        signalType: "ignored",
+        context: "meal checkin: skipped",
+      });
+    } else if (!hasExplicitQuantities) {
+      nextStatus = "needs_adjustment";
+    } else {
+      let totalConsumed = 0;
+      let totalWasted = 0;
+
+      for (const line of lines) {
+        const consumed = line.quantityConsumed ?? 0;
+        const wasted = line.quantityWasted ?? 0;
+        totalConsumed += consumed;
+        totalWasted += wasted;
+        if (consumed > 0) {
+          eventsCreated += this.depleteLotsFefo({
+            householdId: request.householdId,
+            itemKey: line.itemKey,
+            unit: line.unit,
+            quantity: consumed,
+            eventType: "consume",
+            source: "checkin",
+            reason: `meal checkin consumed (${checkinId})`,
+          });
+        }
+        if (wasted > 0) {
+          eventsCreated += this.depleteLotsFefo({
+            householdId: request.householdId,
+            itemKey: line.itemKey,
+            unit: line.unit,
+            quantity: wasted,
+            eventType: "waste",
+            source: "checkin",
+            reason: `meal checkin waste (${checkinId})`,
+          });
+        }
+      }
+
+      if (totalConsumed > 0) {
+        this.recordRecommendationFeedback(existing.recommendationId, {
+          householdId: request.householdId,
+          signalType: "consumed",
+          context: "meal checkin consumed",
+        });
+      }
+      if (totalWasted > 0) {
+        this.recordRecommendationFeedback(existing.recommendationId, {
+          householdId: request.householdId,
+          signalType: "wasted",
+          context: "meal checkin waste",
+        });
+      }
+    }
+
+    const updated: MealCheckin = {
+      ...existing,
+      status: nextStatus,
+      outcome: request.outcome,
+      lines: lines.length > 0 ? lines : undefined,
+      notes: request.notes,
+      updatedAt: nowIso(),
+    };
+    this.mealCheckins.set(checkinId, updated);
+
+    if (request.idempotencyKey) {
+      this.registerIdempotencyKey(
+        this.mealCheckinSubmitIdempotency,
+        checkinId,
+        request.idempotencyKey,
+      );
+    }
+
+    return {
+      checkin: clone(updated),
+      inventory: this.getInventory(request.householdId),
+      eventsCreated,
+    };
+  }
+
   async generateDailyRecommendations(
     householdId: string,
     request: GenerateDailyRecommendationsRequest,
@@ -529,29 +669,32 @@ export class InMemoryJobStore implements ReceiptJobStore {
 
     const run = this.createRun(householdId, "daily", generated.model, targetDate);
 
+    const recommendations = generated.recommendations.map((entry) => {
+      const recommendationId = `rec_${randomUUID()}`;
+      this.recommendationIndex.set(recommendationId, {
+        householdId,
+        itemKeys: clone(entry.itemKeys),
+      });
+
+      return {
+        recommendationId,
+        householdId,
+        mealDate: targetDate,
+        title: entry.title,
+        cuisine: entry.cuisine,
+        rationale: entry.rationale,
+        itemKeys: entry.itemKeys,
+        score: entry.score,
+      };
+    });
+
     const response: DailyRecommendationsResponse = {
       run,
-      recommendations: generated.recommendations.map((entry) => {
-        const recommendationId = `rec_${randomUUID()}`;
-        this.recommendationIndex.set(recommendationId, {
-          householdId,
-          itemKeys: clone(entry.itemKeys),
-        });
-
-        return {
-          recommendationId,
-          householdId,
-          mealDate: targetDate,
-          title: entry.title,
-          cuisine: entry.cuisine,
-          rationale: entry.rationale,
-          itemKeys: entry.itemKeys,
-          score: entry.score,
-        };
-      }),
+      recommendations,
     };
 
     this.dailyRecommendations.set(householdId, clone(response));
+    this.createPendingMealCheckins(householdId, recommendations);
     return response;
   }
 
@@ -651,6 +794,101 @@ export class InMemoryJobStore implements ReceiptJobStore {
       createdAt: nowIso(),
       targetDate,
     };
+  }
+
+  private createPendingMealCheckins(
+    householdId: string,
+    recommendations: DailyRecommendationsResponse["recommendations"],
+  ): void {
+    const checkinIds = this.mealCheckinsByHousehold.get(householdId) ?? [];
+
+    for (const recommendation of recommendations) {
+      const existing = [...this.mealCheckins.values()].find(
+        (checkin) => checkin.recommendationId === recommendation.recommendationId,
+      );
+      if (existing) {
+        continue;
+      }
+
+      const now = nowIso();
+      const checkin: MealCheckin = {
+        checkinId: `checkin_${randomUUID()}`,
+        recommendationId: recommendation.recommendationId,
+        householdId,
+        mealDate: recommendation.mealDate,
+        title: recommendation.title,
+        suggestedItemKeys: recommendation.itemKeys,
+        status: "pending",
+        createdAt: now,
+        updatedAt: now,
+      };
+      this.mealCheckins.set(checkin.checkinId, checkin);
+      checkinIds.push(checkin.checkinId);
+    }
+
+    this.mealCheckinsByHousehold.set(householdId, checkinIds);
+  }
+
+  private depleteLotsFefo(params: {
+    householdId: string;
+    itemKey: string;
+    unit: ReceiptItem["unit"];
+    quantity: number;
+    eventType: "consume" | "waste";
+    source: string;
+    reason: string;
+  }): number {
+    const lots = this.inventoryLots.get(params.householdId) ?? [];
+    const events = this.inventoryEvents.get(params.householdId) ?? [];
+    let remaining = params.quantity;
+    let eventsCreated = 0;
+
+    const candidates = lots
+      .filter(
+        (lot) =>
+          lot.itemKey === params.itemKey && lot.unit === params.unit && lot.quantityRemaining > 0,
+      )
+      .toSorted((a, b) => {
+        const aDate = a.expiresAt ?? a.purchasedAt ?? a.updatedAt;
+        const bDate = b.expiresAt ?? b.purchasedAt ?? b.updatedAt;
+        return aDate.localeCompare(bDate);
+      });
+
+    for (const lot of candidates) {
+      if (remaining <= 0) {
+        break;
+      }
+
+      const drained = Number.parseFloat(Math.min(lot.quantityRemaining, remaining).toFixed(3));
+      if (drained <= 0) {
+        continue;
+      }
+
+      lot.quantityRemaining = Number.parseFloat((lot.quantityRemaining - drained).toFixed(3));
+      lot.updatedAt = nowIso();
+      remaining = Number.parseFloat((remaining - drained).toFixed(3));
+
+      events.push({
+        eventId: `event_${randomUUID()}`,
+        householdId: params.householdId,
+        lotId: lot.lotId,
+        eventType: params.eventType,
+        quantity: drained,
+        unit: params.unit,
+        source: params.source,
+        reason: params.reason,
+        createdAt: nowIso(),
+      });
+      eventsCreated += 1;
+    }
+
+    this.inventoryLots.set(
+      params.householdId,
+      lots.filter((lot) => lot.quantityRemaining > 0),
+    );
+    this.inventoryEvents.set(params.householdId, events);
+
+    return eventsCreated;
   }
 
   private buildFeedbackByItem(householdId: string): Record<string, number> {
@@ -815,12 +1053,15 @@ export class InMemoryJobStore implements ReceiptJobStore {
 
     for (const item of items) {
       const now = nowIso();
-      let lot = lots.find(
+      const matchingLots = lots.filter(
         (candidate) =>
           candidate.itemKey === item.itemKey &&
           candidate.unit === item.unit &&
           candidate.category === item.category,
       );
+      let lot = purchasedAt
+        ? matchingLots.find((candidate) => candidate.purchasedAt === purchasedAt)
+        : (matchingLots.find((candidate) => !candidate.purchasedAt) ?? matchingLots[0]);
 
       if (!lot) {
         const estimatedExpiry = estimateLotExpiry({
@@ -953,6 +1194,23 @@ function inferFallbackItemFromKey(key: string): ReceiptItem {
     category: "other",
     confidence: 0.5,
   };
+}
+
+function normalizeCheckinLines(lines: MealCheckinLine[]): MealCheckinLine[] {
+  return lines
+    .map((line) => ({
+      itemKey: line.itemKey.trim(),
+      unit: line.unit,
+      quantityConsumed:
+        typeof line.quantityConsumed === "number"
+          ? Number.parseFloat(Math.max(0, line.quantityConsumed).toFixed(3))
+          : undefined,
+      quantityWasted:
+        typeof line.quantityWasted === "number"
+          ? Number.parseFloat(Math.max(0, line.quantityWasted).toFixed(3))
+          : undefined,
+    }))
+    .filter((line) => line.itemKey.length > 0);
 }
 
 function defaultSignalValue(signalType: RecommendationFeedbackRequest["signalType"]): number {

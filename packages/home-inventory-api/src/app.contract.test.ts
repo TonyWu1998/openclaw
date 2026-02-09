@@ -10,6 +10,8 @@ import {
   JobStatusResponseSchema,
   LotExpiryOverrideResponseSchema,
   ManualInventoryEntryResponseSchema,
+  MealCheckinPendingResponseSchema,
+  MealCheckinSubmitResponseSchema,
   ReceiptDetailsResponseSchema,
   ReceiptReviewResponseSchema,
   ReceiptUploadResponseSchema,
@@ -272,6 +274,39 @@ describe("home inventory API public contracts", () => {
       await dailyGenerateResponse.json(),
     );
     expect(dailyGenerated.recommendations.length).toBeGreaterThan(0);
+
+    const pendingCheckinsResponse = await fetch(
+      `${baseUrl}/v1/checkins/household_contract/pending`,
+    );
+    const pendingCheckins = MealCheckinPendingResponseSchema.parse(
+      await pendingCheckinsResponse.json(),
+    );
+    expect(pendingCheckins.checkins.length).toBeGreaterThan(0);
+    const firstCheckin = pendingCheckins.checkins[0];
+    expect(firstCheckin).toBeDefined();
+
+    const submitCheckinResponse = await fetch(
+      `${baseUrl}/v1/checkins/${firstCheckin?.checkinId}/submit`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          householdId: "household_contract",
+          outcome: "made",
+          lines: [
+            {
+              itemKey: "tomato",
+              unit: "count",
+              quantityConsumed: 1,
+            },
+          ],
+        }),
+      },
+    );
+    const submittedCheckin = MealCheckinSubmitResponseSchema.parse(
+      await submitCheckinResponse.json(),
+    );
+    expect(submittedCheckin.checkin.status).toBe("completed");
 
     const dailyReadResponse = await fetch(`${baseUrl}/v1/recommendations/household_contract/daily`);
     const dailyRead = DailyRecommendationsResponseSchema.parse(await dailyReadResponse.json());

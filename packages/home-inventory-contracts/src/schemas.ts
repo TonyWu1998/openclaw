@@ -108,6 +108,10 @@ export const ClaimJobResponseSchema = z.object({
   job: ClaimedJobSchema.nullable(),
 });
 
+export const JobStatusResponseSchema = z.object({
+  job: ReceiptProcessJobSchema,
+});
+
 export const JobResultRequestSchema = z.object({
   merchantName: z.string().min(1).max(120).optional(),
   purchasedAt: z.iso.datetime().optional(),
@@ -263,6 +267,7 @@ export type ReceiptProcessJob = z.infer<typeof ReceiptProcessJobSchema>;
 export type ClaimedJob = z.infer<typeof ClaimedJobSchema>;
 export type EnqueueJobResponse = z.infer<typeof EnqueueJobResponseSchema>;
 export type ClaimJobResponse = z.infer<typeof ClaimJobResponseSchema>;
+export type JobStatusResponse = z.infer<typeof JobStatusResponseSchema>;
 export type JobResultRequest = z.infer<typeof JobResultRequestSchema>;
 export type JobResultResponse = z.infer<typeof JobResultResponseSchema>;
 export type CompleteJobRequest = z.infer<typeof CompleteJobRequestSchema>;

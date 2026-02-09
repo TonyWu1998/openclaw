@@ -29,6 +29,16 @@ import {
 type InMemoryJobStoreOptions = {
   uploadOrigin?: string;
   recommendationPlanner?: RecommendationPlanner;
+  maxJobAttempts?: number;
+};
+
+export type DeadLetterRecord = {
+  jobId: string;
+  receiptUploadId: string;
+  householdId: string;
+  attempts: number;
+  error: string;
+  failedAt: string;
 };
 
 function nowIso(): string {
@@ -56,13 +66,16 @@ export class InMemoryJobStore implements ReceiptJobStore {
     string,
     { householdId: string; itemKeys: string[] }
   >();
+  private readonly deadLetters: DeadLetterRecord[] = [];
   private readonly uploadOrigin: string;
   private readonly recommendationPlanner: RecommendationPlanner;
+  private readonly maxJobAttempts: number;
 
   constructor(options: InMemoryJobStoreOptions = {}) {
     this.uploadOrigin = options.uploadOrigin ?? "https://uploads.example.local";
     this.recommendationPlanner =
       options.recommendationPlanner ?? createRecommendationPlannerFromEnv();
+    this.maxJobAttempts = Math.max(1, options.maxJobAttempts ?? 3);
   }
 
   createUpload(request: ReceiptUploadRequest): ReceiptUploadResponse {
@@ -264,11 +277,26 @@ export class InMemoryJobStore implements ReceiptJobStore {
       return null;
     }
 
+    const now = nowIso();
+    if (job.attempts < this.maxJobAttempts) {
+      const retried: ReceiptProcessJob = {
+        ...job,
+        status: "queued",
+        error,
+        updatedAt: now,
+      };
+
+      this.jobs.set(jobId, retried);
+      this.queue.push(jobId);
+
+      return clone(retried);
+    }
+
     const failed: ReceiptProcessJob = {
       ...job,
       status: "failed",
       error,
-      updatedAt: nowIso(),
+      updatedAt: now,
     };
 
     const upload = this.uploads.get(job.receiptUploadId);
@@ -281,6 +309,15 @@ export class InMemoryJobStore implements ReceiptJobStore {
     }
 
     this.jobs.set(jobId, failed);
+    this.deadLetters.push({
+      jobId: failed.jobId,
+      receiptUploadId: failed.receiptUploadId,
+      householdId: failed.householdId,
+      attempts: failed.attempts,
+      error,
+      failedAt: failed.updatedAt,
+    });
+
     return clone(failed);
   }
 
@@ -395,6 +432,10 @@ export class InMemoryJobStore implements ReceiptJobStore {
   getWeeklyRecommendations(householdId: string): WeeklyRecommendationsResponse | null {
     const result = this.weeklyRecommendations.get(householdId);
     return result ? clone(result) : null;
+  }
+
+  listDeadLetters(): DeadLetterRecord[] {
+    return clone(this.deadLetters).toSorted((a, b) => b.failedAt.localeCompare(a.failedAt));
   }
 
   recordRecommendationFeedback(

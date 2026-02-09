@@ -8,13 +8,16 @@ import {
   GenerateDailyRecommendationsRequestSchema,
   GenerateWeeklyRecommendationsRequestSchema,
   HealthResponseSchema,
+  InventorySnapshotResponseSchema,
   JobResultRequestSchema,
   JobResultResponseSchema,
+  JobStatusResponseSchema,
   RecommendationFeedbackRequestSchema,
   RecommendationFeedbackResponseSchema,
   ReceiptDetailsResponseSchema,
   ReceiptProcessRequestSchema,
   ReceiptUploadRequestSchema,
+  ReceiptUploadResponseSchema,
   WeeklyRecommendationsResponseSchema,
   type HealthResponse,
 } from "@openclaw/home-inventory-contracts";
@@ -48,7 +51,7 @@ export function createApp(params: CreateAppParams): Express {
       return;
     }
     const response = params.store.createUpload(body);
-    res.status(201).json(response);
+    res.status(201).json(ReceiptUploadResponseSchema.parse(response));
   });
 
   app.get("/v1/receipts/:receiptUploadId", (req, res) => {
@@ -101,7 +104,7 @@ export function createApp(params: CreateAppParams): Express {
       res.status(404).json({ error: "not_found", message: `job not found: ${jobId}` });
       return;
     }
-    res.json({ job });
+    res.json(JobStatusResponseSchema.parse({ job }));
   });
 
   app.get("/v1/inventory/:householdId", (req, res) => {
@@ -111,7 +114,7 @@ export function createApp(params: CreateAppParams): Express {
     }
 
     const snapshot = params.store.getInventory(householdId);
-    res.json(snapshot);
+    res.json(InventorySnapshotResponseSchema.parse(snapshot));
   });
 
   app.get("/v1/recommendations/:householdId/daily", (req, res) => {

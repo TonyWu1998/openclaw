@@ -7,7 +7,7 @@ Last updated: 2026-02-08
 - [x] Phase 1 completed and merged (`PR #1`): backend foundation, contracts, queue skeleton, migration baseline.
 - [x] Phase 2 completed and merged (`PR #2`): receipt extraction + normalization + inventory mutation events.
 - [x] Phase 3 completed: agent-driven recommendation generation, extension schedules, and feedback adaptation loop.
-- [ ] Phase 4 pending: backend validation and hardening gates before UI/mobile integration.
+- [x] Phase 4 completed: contract coverage, reliability retries/dead-letter behavior, worker restart recovery, and soak tests.
 
 ## Purpose
 

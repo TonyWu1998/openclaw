@@ -118,6 +118,7 @@ describe("home inventory API public contracts", () => {
         body: JSON.stringify({
           householdId: "household_contract",
           ocrText: "Jasmine Rice 2kg\\nTomato x4",
+          receiptImageDataUrl: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAAB",
           merchantName: "Contract Market",
           purchasedAt: "2026-02-08T12:00:00.000Z",
         }),
@@ -166,6 +167,7 @@ describe("home inventory API public contracts", () => {
     const receiptResponse = await fetch(`${baseUrl}/v1/receipts/${uploadPayload.receiptUploadId}`);
     const receiptPayload = ReceiptDetailsResponseSchema.parse(await receiptResponse.json());
     expect(receiptPayload.receipt.status).toBe("parsed");
+    expect(receiptPayload.receipt.receiptImageDataUrl?.startsWith("data:image/")).toBe(true);
 
     const inventoryResponse = await fetch(`${baseUrl}/v1/inventory/household_contract`);
     const inventoryPayload = InventorySnapshotResponseSchema.parse(await inventoryResponse.json());

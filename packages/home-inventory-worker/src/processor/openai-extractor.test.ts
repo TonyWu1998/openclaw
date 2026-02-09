@@ -89,11 +89,21 @@ describe("OpenAiReceiptExtractor", () => {
 
     const items = await extractor.extract({
       merchantName: "Local Shop",
-      ocrText: "Tomato x4",
+      ocrText: "",
+      receiptImageDataUrl: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAAB",
     });
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(String(fetchMock.mock.calls[0]?.[0])).toContain("/chat/completions");
+    const requestBody = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body ?? "{}")) as {
+      messages?: Array<{ content?: unknown }>;
+    };
+    const userContent = requestBody.messages?.[1]?.content as
+      | Array<{ type?: string; image_url?: { url?: string } }>
+      | undefined;
+    expect(Array.isArray(userContent)).toBe(true);
+    expect(userContent?.some((entry) => entry.type === "image_url")).toBe(true);
+    expect(userContent?.[1]?.image_url?.url?.startsWith("data:image/")).toBe(true);
     expect(items).toHaveLength(1);
     expect(items[0]?.rawName).toBe("Tomato");
     expect(items[0]?.category).toBe("produce");

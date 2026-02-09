@@ -9,6 +9,7 @@ Last updated: 2026-02-09
 - [x] Phase 3 completed: agent-driven recommendation generation, extension schedules, and feedback adaptation loop.
 - [x] Phase 4 completed: contract coverage, reliability retries/dead-letter behavior, worker restart recovery, and soak tests.
 - [x] LLM provider portability completed: OpenAI, OpenRouter, Gemini-compatible OpenAI APIs, and local OpenAI-compatible runtimes (for example LM Studio).
+- [x] Phase 4.5 completed: vision-ready receipt ingestion input and live LM Studio end-to-end validation (upload -> extract/persist -> recommend -> inventory update).
 
 ## Purpose
 
@@ -128,7 +129,7 @@ Implementation model:
 1. User uploads receipt file.
 2. API stores file in Supabase Storage and creates `receipt_uploads` record.
 3. API enqueues async `receipt_process` job.
-4. Worker calls OpenAI for structured extraction.
+4. Worker calls the configured LLM for structured extraction from OCR text and optional receipt image data.
 5. Worker normalizes items and writes inventory lots/events.
 6. OpenClaw scheduled job runs daily plan generation.
 7. OpenClaw scheduled job runs weekly purchase optimization.
@@ -206,6 +207,17 @@ Run acceptance criteria:
 - If confidence >= threshold and constraints pass: publish plan.
 - If confidence below threshold: publish deterministic fallback plan and flag for review.
 - If schema validation fails: reject output and retry with safe prompt variant.
+
+## Live E2E Validation (LM Studio)
+
+- Real-model E2E flow is covered by:
+  - `packages/home-inventory-worker/src/runner/worker-runner.live-lmstudio.e2e.test.ts`
+- The test executes this path end to end:
+  - upload receipt -> enqueue processing -> worker extraction/persist -> daily/weekly recommendation generation -> feedback -> second receipt inventory update
+- Enable and run:
+  - `HOME_INVENTORY_LIVE_LMSTUDIO=1`
+  - `HOME_INVENTORY_LIVE_LMSTUDIO_BASE_URL=http://<lmstudio-host>:<port>/v1`
+  - `HOME_INVENTORY_LIVE_LMSTUDIO_MODEL=<model-id>`
 
 ## Security Defaults
 

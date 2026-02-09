@@ -76,10 +76,12 @@ export class OpenAiReceiptExtractor implements ReceiptExtractor {
   }
 
   async extract(input: ReceiptExtractionInput): Promise<DraftReceiptItem[]> {
-    if (input.ocrText.trim().length === 0) {
+    const normalizedImageDataUrl = normalizeImageDataUrl(input.receiptImageDataUrl);
+    if (input.ocrText.trim().length === 0 && !normalizedImageDataUrl) {
       return [];
     }
 
+    const userText = buildUserText(input.merchantName, input.ocrText);
     const payload = {
       model: this.model,
       input: [
@@ -101,8 +103,16 @@ export class OpenAiReceiptExtractor implements ReceiptExtractor {
           content: [
             {
               type: "input_text",
-              text: `Merchant: ${input.merchantName ?? "unknown"}\nOCR:\n${input.ocrText}`,
+              text: userText,
             },
+            ...(normalizedImageDataUrl
+              ? [
+                  {
+                    type: "input_image",
+                    image_url: normalizedImageDataUrl,
+                  },
+                ]
+              : []),
           ],
         },
       ],
@@ -118,7 +128,10 @@ export class OpenAiReceiptExtractor implements ReceiptExtractor {
 
     const rawText =
       this.requestMode === "chat_completions"
-        ? await this.callChatCompletionsApi(input)
+        ? await this.callChatCompletionsApi({
+            ...input,
+            receiptImageDataUrl: normalizedImageDataUrl,
+          })
         : await this.callResponsesApi(payload);
 
     if (!rawText) {
@@ -179,6 +192,17 @@ export class OpenAiReceiptExtractor implements ReceiptExtractor {
     const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
 
     try {
+      const userText = buildUserText(input.merchantName, input.ocrText);
+      const userContent = input.receiptImageDataUrl
+        ? [
+            { type: "text", text: userText },
+            {
+              type: "image_url",
+              image_url: { url: input.receiptImageDataUrl },
+            },
+          ]
+        : userText;
+
       const response = await fetch(`${this.baseUrl}/chat/completions`, {
         method: "POST",
         headers: this.buildHeaders(),
@@ -195,7 +219,7 @@ export class OpenAiReceiptExtractor implements ReceiptExtractor {
             },
             {
               role: "user",
-              content: `Merchant: ${input.merchantName ?? "unknown"}\nOCR:\n${input.ocrText}`,
+              content: userContent,
             },
           ],
           response_format: {
@@ -339,6 +363,27 @@ function extractChatCompletionText(payload: ChatCompletionsPayload): string | nu
     return null;
   }
   return parts.join("\n");
+}
+
+function normalizeImageDataUrl(value: string | undefined): string | undefined {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+
+  const trimmed = value.trim();
+  if (trimmed.length === 0 || !trimmed.startsWith("data:image/")) {
+    return undefined;
+  }
+  return trimmed;
+}
+
+function buildUserText(merchantName: string | undefined, ocrText: string): string {
+  const normalizedOcrText = ocrText.trim();
+  const ocrSection =
+    normalizedOcrText.length > 0
+      ? normalizedOcrText
+      : "[not provided; use attached receipt image as primary source]";
+  return `Merchant: ${merchantName ?? "unknown"}\nOCR:\n${ocrSection}`;
 }
 
 function parseItemsJson(raw: string): unknown {

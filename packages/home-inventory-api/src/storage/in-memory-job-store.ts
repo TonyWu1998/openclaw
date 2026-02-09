@@ -124,6 +124,7 @@ export class InMemoryJobStore implements ReceiptJobStore {
       ...upload,
       status: "processing",
       ocrText: params.request.ocrText ?? upload.ocrText,
+      receiptImageDataUrl: params.request.receiptImageDataUrl ?? upload.receiptImageDataUrl,
       merchantName: params.request.merchantName ?? upload.merchantName,
       purchasedAt: params.request.purchasedAt ?? upload.purchasedAt,
       updatedAt: now,

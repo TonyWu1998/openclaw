@@ -76,7 +76,7 @@ describe("PhaseTwoReceiptProcessor", () => {
     expect(result.items[0]?.category).toBe("dairy");
   });
 
-  it("throws when receipt has no OCR text", async () => {
+  it("throws when receipt has neither OCR text nor image data", async () => {
     const extractor: ReceiptExtractor = {
       extract: async () => [{ rawName: "Rice", quantity: 1 }],
     };
@@ -86,7 +86,26 @@ describe("PhaseTwoReceiptProcessor", () => {
       fallbackExtractor: extractor,
     });
 
-    await expect(processor.process(claimedJob(""))).rejects.toThrow("has no OCR text");
+    await expect(processor.process(claimedJob(""))).rejects.toThrow(
+      "has neither OCR text nor image data",
+    );
+  });
+
+  it("accepts image-only receipts for extraction", async () => {
+    const extractor: ReceiptExtractor = {
+      extract: async () => [{ rawName: "Olive Oil", quantity: 1, unit: "bottle" }],
+    };
+
+    const processor = new PhaseTwoReceiptProcessor({
+      primaryExtractor: extractor,
+      fallbackExtractor: extractor,
+    });
+
+    const job = claimedJob("");
+    job.receipt.receiptImageDataUrl = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAAB";
+
+    const result = await processor.process(job);
+    expect(result.items[0]?.itemKey).toBe("olive-oil");
   });
 
   it("resolves OpenRouter config from env with OpenRouter headers", () => {

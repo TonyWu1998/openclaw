@@ -1,12 +1,15 @@
 import type {
   ClaimedJob,
   DailyRecommendationsResponse,
+  ExpiryRiskResponse,
   GenerateDailyRecommendationsRequest,
   GenerateWeeklyRecommendationsRequest,
   InventoryEvent,
   InventorySnapshotResponse,
   InventoryLot,
   JobResultRequest,
+  LotExpiryOverrideRequest,
+  LotExpiryOverrideResponse,
   ManualInventoryEntryRequest,
   ManualInventoryEntryResponse,
   RecommendationFeedbackRecord,
@@ -25,6 +28,12 @@ import type {
 } from "@openclaw/home-inventory-contracts";
 import { randomUUID } from "node:crypto";
 import type { ReceiptJobStore } from "../types/job-store.js";
+import {
+  daysUntilExpiry,
+  estimateLotExpiry,
+  resolveLotExpirySource,
+  riskLevelFromDaysRemaining,
+} from "../domain/expiry-intelligence.js";
 import {
   createRecommendationPlannerFromEnv,
   type RecommendationPlanner,
@@ -447,6 +456,62 @@ export class InMemoryJobStore implements ReceiptJobStore {
     };
   }
 
+  overrideLotExpiry(
+    householdId: string,
+    lotId: string,
+    request: LotExpiryOverrideRequest,
+  ): LotExpiryOverrideResponse | null {
+    const lots = this.inventoryLots.get(householdId) ?? [];
+    const lot = lots.find((entry) => entry.lotId === lotId);
+    if (!lot) {
+      return null;
+    }
+
+    lot.expiresAt = request.expiresAt;
+    lot.expirySource = "exact";
+    lot.expiryConfidence = 1;
+    lot.updatedAt = nowIso();
+
+    this.inventoryLots.set(householdId, lots);
+    return {
+      lot: clone(lot),
+      eventsCreated: 0,
+    };
+  }
+
+  getExpiryRisk(householdId: string): ExpiryRiskResponse {
+    const asOf = nowIso();
+    const asOfDate = new Date(asOf);
+    const lots = this.inventoryLots.get(householdId) ?? [];
+    const items = lots
+      .filter((lot) => lot.quantityRemaining > 0 && (lot.expiresAt || lot.expiryEstimatedAt))
+      .map((lot) => {
+        const expiresAt = lot.expiresAt ?? lot.expiryEstimatedAt ?? asOf;
+        const source = resolveLotExpirySource(lot);
+        const daysRemaining = daysUntilExpiry(expiresAt, asOfDate);
+        return {
+          lotId: lot.lotId,
+          itemKey: lot.itemKey,
+          itemName: lot.itemName,
+          category: lot.category,
+          quantityRemaining: lot.quantityRemaining,
+          unit: lot.unit,
+          expiresAt,
+          expirySource: source,
+          expiryConfidence: lot.expiryConfidence ?? (source === "exact" ? 1 : 0.5),
+          daysRemaining,
+          riskLevel: riskLevelFromDaysRemaining(daysRemaining),
+        };
+      })
+      .toSorted((a, b) => a.daysRemaining - b.daysRemaining);
+
+    return {
+      householdId,
+      asOf,
+      items,
+    };
+  }
+
   async generateDailyRecommendations(
     householdId: string,
     request: GenerateDailyRecommendationsRequest,
@@ -758,6 +823,10 @@ export class InMemoryJobStore implements ReceiptJobStore {
       );
 
       if (!lot) {
+        const estimatedExpiry = estimateLotExpiry({
+          category: item.category,
+          purchasedAt,
+        });
         lot = {
           lotId: `lot_${randomUUID()}`,
           householdId,
@@ -767,6 +836,10 @@ export class InMemoryJobStore implements ReceiptJobStore {
           unit: item.unit,
           category: item.category,
           purchasedAt,
+          expiresAt: estimatedExpiry.expiresAt,
+          expiryEstimatedAt: estimatedExpiry.expiryEstimatedAt,
+          expirySource: estimatedExpiry.expirySource,
+          expiryConfidence: estimatedExpiry.expiryConfidence,
           updatedAt: now,
         };
         lots.push(lot);
@@ -777,6 +850,16 @@ export class InMemoryJobStore implements ReceiptJobStore {
       lot.updatedAt = now;
       if (purchasedAt) {
         lot.purchasedAt = purchasedAt;
+      }
+      if (lot.expirySource !== "exact") {
+        const estimatedExpiry = estimateLotExpiry({
+          category: item.category,
+          purchasedAt: lot.purchasedAt,
+        });
+        lot.expiresAt = estimatedExpiry.expiresAt;
+        lot.expiryEstimatedAt = estimatedExpiry.expiryEstimatedAt;
+        lot.expirySource = estimatedExpiry.expirySource;
+        lot.expiryConfidence = estimatedExpiry.expiryConfidence;
       }
 
       events.push({

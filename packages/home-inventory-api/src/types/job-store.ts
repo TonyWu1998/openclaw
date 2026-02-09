@@ -1,10 +1,13 @@
 import type {
   ClaimedJob,
   DailyRecommendationsResponse,
+  ExpiryRiskResponse,
   GenerateDailyRecommendationsRequest,
   GenerateWeeklyRecommendationsRequest,
   InventorySnapshotResponse,
   JobResultRequest,
+  LotExpiryOverrideRequest,
+  LotExpiryOverrideResponse,
   ManualInventoryEntryRequest,
   ManualInventoryEntryResponse,
   RecommendationFeedbackRecord,
@@ -47,6 +50,12 @@ export type ReceiptJobStore = {
     householdId: string,
     request: ManualInventoryEntryRequest,
   ) => ManualInventoryEntryResponse;
+  overrideLotExpiry: (
+    householdId: string,
+    lotId: string,
+    request: LotExpiryOverrideRequest,
+  ) => LotExpiryOverrideResponse | null;
+  getExpiryRisk: (householdId: string) => ExpiryRiskResponse;
   generateDailyRecommendations: (
     householdId: string,
     request: GenerateDailyRecommendationsRequest,

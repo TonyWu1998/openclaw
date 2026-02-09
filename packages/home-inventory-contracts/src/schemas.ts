@@ -29,6 +29,7 @@ export const ItemCategorySchema = z.enum([
 export const ReceiptStatusSchema = z.enum(["uploaded", "processing", "parsed", "failed"]);
 export const JobStatusSchema = z.enum(["queued", "processing", "completed", "failed"]);
 export const InventoryEventTypeSchema = z.enum(["add", "consume", "adjust", "waste"]);
+export const ExpirySourceSchema = z.enum(["exact", "estimated", "unknown"]);
 
 export const IdSchema = z.string().min(1).max(128);
 
@@ -162,6 +163,10 @@ export const InventoryLotSchema = z.object({
   unit: UnitSchema,
   category: ItemCategorySchema,
   purchasedAt: z.iso.datetime().optional(),
+  expiresAt: z.iso.datetime().optional(),
+  expiryEstimatedAt: z.iso.datetime().optional(),
+  expirySource: ExpirySourceSchema.optional(),
+  expiryConfidence: z.number().min(0).max(1).optional(),
   updatedAt: z.iso.datetime(),
 });
 
@@ -195,6 +200,39 @@ export const ManualInventoryEntryResponseSchema = z.object({
   inventory: InventorySnapshotResponseSchema,
   applied: z.boolean(),
   eventsCreated: z.number().int().min(0),
+});
+
+export const LotExpiryOverrideRequestSchema = z.object({
+  householdId: IdSchema,
+  expiresAt: z.iso.datetime(),
+  notes: z.string().max(500).optional(),
+});
+
+export const LotExpiryOverrideResponseSchema = z.object({
+  lot: InventoryLotSchema,
+  eventsCreated: z.number().int().min(0),
+});
+
+export const ExpiryRiskLevelSchema = z.enum(["critical", "high", "medium", "low"]);
+
+export const ExpiryRiskItemSchema = z.object({
+  lotId: IdSchema,
+  itemKey: z.string().min(1).max(160),
+  itemName: z.string().min(1).max(240),
+  category: ItemCategorySchema,
+  quantityRemaining: z.number().nonnegative(),
+  unit: UnitSchema,
+  expiresAt: z.iso.datetime(),
+  expirySource: ExpirySourceSchema,
+  expiryConfidence: z.number().min(0).max(1),
+  daysRemaining: z.number().int(),
+  riskLevel: ExpiryRiskLevelSchema,
+});
+
+export const ExpiryRiskResponseSchema = z.object({
+  householdId: IdSchema,
+  asOf: z.iso.datetime(),
+  items: z.array(ExpiryRiskItemSchema),
 });
 
 export const RecommendationRunTypeSchema = z.enum(["daily", "weekly"]);
@@ -291,6 +329,7 @@ export type ItemCategory = z.infer<typeof ItemCategorySchema>;
 export type ReceiptStatus = z.infer<typeof ReceiptStatusSchema>;
 export type JobStatus = z.infer<typeof JobStatusSchema>;
 export type InventoryEventType = z.infer<typeof InventoryEventTypeSchema>;
+export type ExpirySource = z.infer<typeof ExpirySourceSchema>;
 export type ReceiptItem = z.infer<typeof ReceiptItemSchema>;
 export type ReceiptUploadRequest = z.infer<typeof ReceiptUploadRequestSchema>;
 export type ReceiptUploadResponse = z.infer<typeof ReceiptUploadResponseSchema>;
@@ -314,6 +353,11 @@ export type InventoryEvent = z.infer<typeof InventoryEventSchema>;
 export type InventorySnapshotResponse = z.infer<typeof InventorySnapshotResponseSchema>;
 export type ManualInventoryEntryRequest = z.infer<typeof ManualInventoryEntryRequestSchema>;
 export type ManualInventoryEntryResponse = z.infer<typeof ManualInventoryEntryResponseSchema>;
+export type LotExpiryOverrideRequest = z.infer<typeof LotExpiryOverrideRequestSchema>;
+export type LotExpiryOverrideResponse = z.infer<typeof LotExpiryOverrideResponseSchema>;
+export type ExpiryRiskLevel = z.infer<typeof ExpiryRiskLevelSchema>;
+export type ExpiryRiskItem = z.infer<typeof ExpiryRiskItemSchema>;
+export type ExpiryRiskResponse = z.infer<typeof ExpiryRiskResponseSchema>;
 export type RecommendationRunType = z.infer<typeof RecommendationRunTypeSchema>;
 export type RecommendationPriority = z.infer<typeof RecommendationPrioritySchema>;
 export type FeedbackSignalType = z.infer<typeof FeedbackSignalTypeSchema>;

@@ -10,6 +10,26 @@ Last updated: 2026-02-09
 - [x] Phase 4 completed: contract coverage, reliability retries/dead-letter behavior, worker restart recovery, and soak tests.
 - [x] LLM provider portability completed: OpenAI, OpenRouter, Gemini-compatible OpenAI APIs, and local OpenAI-compatible runtimes (for example LM Studio).
 - [x] Phase 4.5 completed: vision-ready receipt ingestion input and live LM Studio end-to-end validation (upload -> extract/persist -> recommend -> inventory update).
+- [x] Phase 5A completed and merged (`PR #7`, merge `e2bdaa0346d0d67028933ffbed44b4702f8c5c06`): receipt review + manual inventory entry.
+
+## Phase 5 Execution Log
+
+### Phase 5A: Receipt Review + Manual Entry
+
+- Branch: `codex/home-inventory-phase5a-receipt-review-manual-entry`
+- PR: https://github.com/TonyWu1998/openclaw/pull/7
+- Merge commit: `e2bdaa0346d0d67028933ffbed44b4702f8c5c06`
+- Added endpoints:
+  - `PUT /v1/receipts/:receiptUploadId/review`
+  - `POST /v1/inventory/:householdId/manual-items`
+- Added migration:
+  - `packages/home-inventory-api/sql/migrations/20260209_0004_phase5a_review_manual.sql`
+- Validation commands run:
+  - `npm test` (in `packages/home-inventory-contracts`)
+  - `npm test` (in `packages/home-inventory-api`)
+  - `npm test` (in `packages/home-inventory-worker`)
+  - `npx -y pnpm@10.23.0 build`
+  - `npx -y pnpm@10.23.0 check`
 
 ## Purpose
 

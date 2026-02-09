@@ -242,3 +242,100 @@ describe("InMemoryJobStore reliability", () => {
     expect(elapsedMs).toBeLessThan(4000);
   });
 });
+
+describe("InMemoryJobStore phase5a mutations", () => {
+  it("applies receipt review deltas and writes receipt_review events", () => {
+    const householdId = "household_review";
+    const store = new InMemoryJobStore();
+    seedInventory(store, householdId);
+
+    const upload = store.createUpload({
+      householdId,
+      filename: "review-source.jpg",
+      contentType: "image/jpeg",
+    });
+    const job = store.enqueueJob({
+      householdId,
+      receiptUploadId: upload.receiptUploadId,
+      request: { householdId, ocrText: "Tomato x2" },
+    });
+    store.submitJobResult(job.jobId, {
+      items: [
+        {
+          itemKey: "tomato",
+          rawName: "Tomato",
+          normalizedName: "tomato",
+          quantity: 2,
+          unit: "count",
+          category: "produce",
+          confidence: 0.8,
+        },
+      ],
+    });
+
+    const reviewed = store.reviewReceipt(upload.receiptUploadId, {
+      householdId,
+      mode: "overwrite",
+      items: [
+        {
+          itemKey: "tomato",
+          rawName: "Tomato",
+          normalizedName: "tomato",
+          quantity: 1,
+          unit: "count",
+          category: "produce",
+          confidence: 0.9,
+        },
+      ],
+      idempotencyKey: "review-1",
+    });
+
+    expect(reviewed?.applied).toBe(true);
+    expect(reviewed?.eventsCreated).toBe(1);
+
+    const snapshot = store.getInventory(householdId);
+    expect(snapshot.events.some((event) => event.source === "receipt_review")).toBe(true);
+    const tomatoLot = snapshot.lots.find((lot) => lot.itemKey === "tomato");
+    expect(tomatoLot?.quantityRemaining).toBe(5);
+  });
+
+  it("keeps manual entry idempotent with repeated idempotency key", () => {
+    const householdId = "household_manual";
+    const store = new InMemoryJobStore();
+
+    const first = store.addManualItems(householdId, {
+      idempotencyKey: "manual-1",
+      items: [
+        {
+          itemKey: "trash-bag",
+          rawName: "Trash Bag",
+          normalizedName: "trash bag",
+          quantity: 1,
+          unit: "box",
+          category: "household",
+          confidence: 1,
+        },
+      ],
+    });
+    expect(first.applied).toBe(true);
+    expect(first.eventsCreated).toBe(1);
+
+    const second = store.addManualItems(householdId, {
+      idempotencyKey: "manual-1",
+      items: [
+        {
+          itemKey: "trash-bag",
+          rawName: "Trash Bag",
+          normalizedName: "trash bag",
+          quantity: 1,
+          unit: "box",
+          category: "household",
+          confidence: 1,
+        },
+      ],
+    });
+    expect(second.applied).toBe(false);
+    expect(second.eventsCreated).toBe(0);
+    expect(second.inventory.events.filter((event) => event.source === "manual")).toHaveLength(1);
+  });
+});

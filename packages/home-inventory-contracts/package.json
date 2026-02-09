@@ -2,8 +2,8 @@
   "name": "@openclaw/home-inventory-contracts",
   "version": "0.1.0",
   "private": true,
-  "type": "module",
   "description": "Shared API contracts for the home inventory backend",
+  "type": "module",
   "exports": {
     ".": "./src/index.ts"
   },

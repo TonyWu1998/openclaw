@@ -12,10 +12,14 @@ import {
   JobResultRequestSchema,
   JobResultResponseSchema,
   JobStatusResponseSchema,
+  ManualInventoryEntryRequestSchema,
+  ManualInventoryEntryResponseSchema,
   RecommendationFeedbackRequestSchema,
   RecommendationFeedbackResponseSchema,
   ReceiptDetailsResponseSchema,
   ReceiptProcessRequestSchema,
+  ReceiptReviewRequestSchema,
+  ReceiptReviewResponseSchema,
   ReceiptUploadRequestSchema,
   ReceiptUploadResponseSchema,
   WeeklyRecommendationsResponseSchema,
@@ -71,6 +75,28 @@ export function createApp(params: CreateAppParams): Express {
     res.json(ReceiptDetailsResponseSchema.parse(receipt));
   });
 
+  app.put("/v1/receipts/:receiptUploadId/review", (req, res) => {
+    const receiptUploadId = parseParam(req.params.receiptUploadId, "receiptUploadId", res);
+    if (!receiptUploadId) {
+      return;
+    }
+
+    const body = parseBody(ReceiptReviewRequestSchema, req, res);
+    if (!body) {
+      return;
+    }
+
+    const reviewed = params.store.reviewReceipt(receiptUploadId, body);
+    if (!reviewed) {
+      res
+        .status(404)
+        .json({ error: "not_found", message: `receipt not found: ${receiptUploadId}` });
+      return;
+    }
+
+    res.json(ReceiptReviewResponseSchema.parse(reviewed));
+  });
+
   app.post("/v1/receipts/:receiptUploadId/process", (req, res) => {
     const receiptUploadId = parseParam(req.params.receiptUploadId, "receiptUploadId", res);
     if (!receiptUploadId) {
@@ -115,6 +141,21 @@ export function createApp(params: CreateAppParams): Express {
 
     const snapshot = params.store.getInventory(householdId);
     res.json(InventorySnapshotResponseSchema.parse(snapshot));
+  });
+
+  app.post("/v1/inventory/:householdId/manual-items", (req, res) => {
+    const householdId = parseParam(req.params.householdId, "householdId", res);
+    if (!householdId) {
+      return;
+    }
+
+    const body = parseBody(ManualInventoryEntryRequestSchema, req, res);
+    if (!body) {
+      return;
+    }
+
+    const result = params.store.addManualItems(householdId, body);
+    res.status(201).json(ManualInventoryEntryResponseSchema.parse(result));
   });
 
   app.get("/v1/recommendations/:householdId/daily", (req, res) => {

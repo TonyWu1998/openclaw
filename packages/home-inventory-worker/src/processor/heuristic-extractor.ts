@@ -1,6 +1,7 @@
 import type { DraftReceiptItem, ReceiptExtractionInput, ReceiptExtractor } from "./types.js";
 
-const LINE_REGEX = /^(?<name>[A-Za-z][A-Za-z0-9\s().,/+-]*?)(?:\s+(?<qty>\d+(?:\.\d+)?))?(?:\s*(?<unit>kg|g|lb|lbs|oz|ml|l|count|x|pack|box|bottle))?$/i;
+const LINE_REGEX =
+  /^(?<name>[A-Za-z][A-Za-z0-9\s().,/+-]*?)(?:\s+(?<qty>\d+(?:\.\d+)?))?(?:\s*(?<unit>kg|g|lb|lbs|oz|ml|l|count|x|pack|box|bottle))?$/i;
 
 export class HeuristicReceiptExtractor implements ReceiptExtractor {
   async extract(input: ReceiptExtractionInput): Promise<DraftReceiptItem[]> {
@@ -34,7 +35,10 @@ export class HeuristicReceiptExtractor implements ReceiptExtractor {
 }
 
 function parseLine(line: string): DraftReceiptItem | null {
-  const cleaned = line.replace(/[|*_~]/g, " ").replace(/\s+/g, " ").trim();
+  const cleaned = line
+    .replace(/[|*_~]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
   if (cleaned.length === 0) {
     return null;
   }
@@ -54,7 +58,9 @@ function parseLine(line: string): DraftReceiptItem | null {
     return null;
   }
 
-  const quantity = match.groups.qty ? Number.parseFloat(match.groups.qty) : inferQuantityFallback(cleaned);
+  const quantity = match.groups.qty
+    ? Number.parseFloat(match.groups.qty)
+    : inferQuantityFallback(cleaned);
   const unit = match.groups.unit ?? inferUnitFallback(cleaned);
 
   return {
@@ -79,14 +85,32 @@ function inferQuantityFallback(line: string): number {
 
 function inferUnitFallback(line: string): string {
   const lowered = line.toLowerCase();
-  if (lowered.includes("kg")) return "kg";
-  if (lowered.includes(" g")) return "g";
-  if (lowered.includes("lb")) return "lb";
-  if (lowered.includes("oz")) return "oz";
-  if (lowered.includes("ml")) return "ml";
-  if (lowered.includes(" l")) return "l";
-  if (lowered.includes("pack")) return "pack";
-  if (lowered.includes("box")) return "box";
-  if (lowered.includes("bottle")) return "bottle";
+  if (lowered.includes("kg")) {
+    return "kg";
+  }
+  if (lowered.includes(" g")) {
+    return "g";
+  }
+  if (lowered.includes("lb")) {
+    return "lb";
+  }
+  if (lowered.includes("oz")) {
+    return "oz";
+  }
+  if (lowered.includes("ml")) {
+    return "ml";
+  }
+  if (lowered.includes(" l")) {
+    return "l";
+  }
+  if (lowered.includes("pack")) {
+    return "pack";
+  }
+  if (lowered.includes("box")) {
+    return "box";
+  }
+  if (lowered.includes("bottle")) {
+    return "bottle";
+  }
   return "count";
 }

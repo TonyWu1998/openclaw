@@ -2,11 +2,15 @@ import { describe, expect, it } from "vitest";
 import {
   ClaimJobResponseSchema,
   DailyRecommendationsResponseSchema,
-  ReceiptProcessRequestSchema,
   JobStatusResponseSchema,
   JobResultRequestSchema,
   JobStatusSchema,
+  ManualInventoryEntryRequestSchema,
+  ManualInventoryEntryResponseSchema,
   RecommendationFeedbackRequestSchema,
+  ReceiptProcessRequestSchema,
+  ReceiptReviewRequestSchema,
+  ReceiptReviewResponseSchema,
   ReceiptDetailsResponseSchema,
   ReceiptItemSchema,
   ReceiptUploadResponseSchema,
@@ -167,5 +171,95 @@ describe("home inventory contract schemas", () => {
     });
 
     expect(parsed.job.status).toBe("queued");
+  });
+
+  it("validates receipt review request and response payloads", () => {
+    const request = ReceiptReviewRequestSchema.parse({
+      householdId: "household_1",
+      mode: "append",
+      items: [
+        {
+          itemKey: "milk",
+          rawName: "Whole Milk",
+          normalizedName: "whole milk",
+          quantity: 1,
+          unit: "l",
+          category: "dairy",
+          confidence: 0.8,
+        },
+      ],
+      idempotencyKey: "review-key-1",
+    });
+    expect(request.mode).toBe("append");
+
+    const response = ReceiptReviewResponseSchema.parse({
+      receipt: {
+        receiptUploadId: "receipt_1",
+        householdId: "household_1",
+        filename: "receipt.jpg",
+        contentType: "image/jpeg",
+        path: "receipts/household_1/receipt_1/receipt.jpg",
+        status: "parsed",
+        createdAt: "2026-02-08T12:00:00.000Z",
+        updatedAt: "2026-02-08T12:05:00.000Z",
+        items: request.items,
+      },
+      applied: true,
+      eventsCreated: 1,
+    });
+    expect(response.applied).toBe(true);
+  });
+
+  it("validates manual inventory entry request and response payloads", () => {
+    const request = ManualInventoryEntryRequestSchema.parse({
+      items: [
+        {
+          itemKey: "eggs",
+          rawName: "Large Eggs",
+          normalizedName: "large eggs",
+          quantity: 12,
+          unit: "count",
+          category: "protein",
+          confidence: 0.95,
+        },
+      ],
+      notes: "manual add from memory",
+      idempotencyKey: "manual-key-1",
+    });
+    expect(request.items[0]?.itemKey).toBe("eggs");
+
+    const response = ManualInventoryEntryResponseSchema.parse({
+      householdId: "household_1",
+      applied: true,
+      eventsCreated: 1,
+      inventory: {
+        householdId: "household_1",
+        lots: [
+          {
+            lotId: "lot_1",
+            householdId: "household_1",
+            itemKey: "eggs",
+            itemName: "large eggs",
+            quantityRemaining: 12,
+            unit: "count",
+            category: "protein",
+            updatedAt: "2026-02-08T12:10:00.000Z",
+          },
+        ],
+        events: [
+          {
+            eventId: "event_1",
+            householdId: "household_1",
+            lotId: "lot_1",
+            eventType: "add",
+            quantity: 12,
+            unit: "count",
+            source: "manual",
+            createdAt: "2026-02-08T12:10:00.000Z",
+          },
+        ],
+      },
+    });
+    expect(response.inventory.events[0]?.source).toBe("manual");
   });
 });

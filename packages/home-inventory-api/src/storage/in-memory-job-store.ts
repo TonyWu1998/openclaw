@@ -7,6 +7,8 @@ import type {
   InventorySnapshotResponse,
   InventoryLot,
   JobResultRequest,
+  ManualInventoryEntryRequest,
+  ManualInventoryEntryResponse,
   RecommendationFeedbackRecord,
   RecommendationFeedbackRequest,
   RecommendationRun,
@@ -15,6 +17,8 @@ import type {
   ReceiptItem,
   ReceiptProcessJob,
   ReceiptProcessRequest,
+  ReceiptReviewRequest,
+  ReceiptReviewResponse,
   ReceiptUploadRequest,
   ReceiptUploadResponse,
   WeeklyRecommendationsResponse,
@@ -66,6 +70,8 @@ export class InMemoryJobStore implements ReceiptJobStore {
     string,
     { householdId: string; itemKeys: string[] }
   >();
+  private readonly receiptReviewIdempotency = new Map<string, Set<string>>();
+  private readonly manualEntryIdempotency = new Map<string, Set<string>>();
   private readonly deadLetters: DeadLetterRecord[] = [];
   private readonly uploadOrigin: string;
   private readonly recommendationPlanner: RecommendationPlanner;
@@ -158,6 +164,73 @@ export class InMemoryJobStore implements ReceiptJobStore {
       return null;
     }
     return { receipt: clone(receipt) };
+  }
+
+  reviewReceipt(
+    receiptUploadId: string,
+    request: ReceiptReviewRequest,
+  ): ReceiptReviewResponse | null {
+    const receipt = this.uploads.get(receiptUploadId);
+    if (!receipt || receipt.householdId !== request.householdId) {
+      return null;
+    }
+
+    if (
+      request.idempotencyKey &&
+      this.hasIdempotencyKey(this.receiptReviewIdempotency, receiptUploadId, request.idempotencyKey)
+    ) {
+      return {
+        receipt: clone(receipt),
+        applied: false,
+        eventsCreated: 0,
+      };
+    }
+
+    const currentItems = receipt.items ?? [];
+    const reviewedItems =
+      request.mode === "append"
+        ? mergeReceiptItems([...currentItems, ...request.items])
+        : mergeReceiptItems(request.items);
+
+    const eventsCreated = this.applyInventoryItemDelta(
+      request.householdId,
+      currentItems,
+      reviewedItems,
+      "receipt_review",
+      request.purchasedAt ?? receipt.purchasedAt,
+      request.notes,
+    );
+
+    const updated: ReceiptDetailsResponse["receipt"] = {
+      ...receipt,
+      status: "parsed",
+      merchantName: request.merchantName ?? receipt.merchantName,
+      purchasedAt: request.purchasedAt ?? receipt.purchasedAt,
+      items: reviewedItems,
+      updatedAt: nowIso(),
+    };
+
+    this.uploads.set(receiptUploadId, updated);
+    if (request.idempotencyKey) {
+      this.registerIdempotencyKey(
+        this.receiptReviewIdempotency,
+        receiptUploadId,
+        request.idempotencyKey,
+      );
+    }
+
+    const hasItemChanges =
+      computeQuantityFingerprint(currentItems) !== computeQuantityFingerprint(reviewedItems);
+    const hasMetadataChanges =
+      request.merchantName !== undefined ||
+      request.purchasedAt !== undefined ||
+      request.notes !== undefined;
+
+    return {
+      receipt: clone(updated),
+      applied: hasItemChanges || hasMetadataChanges || eventsCreated > 0,
+      eventsCreated,
+    };
   }
 
   claimNextJob(): ClaimedJob | null {
@@ -337,6 +410,43 @@ export class InMemoryJobStore implements ReceiptJobStore {
     };
   }
 
+  addManualItems(
+    householdId: string,
+    request: ManualInventoryEntryRequest,
+  ): ManualInventoryEntryResponse {
+    if (
+      request.idempotencyKey &&
+      this.hasIdempotencyKey(this.manualEntryIdempotency, householdId, request.idempotencyKey)
+    ) {
+      return {
+        householdId,
+        inventory: this.getInventory(householdId),
+        applied: false,
+        eventsCreated: 0,
+      };
+    }
+
+    const items = mergeReceiptItems(request.items);
+    const eventsCreated = this.applyInventoryMutations(
+      householdId,
+      items,
+      request.purchasedAt,
+      "manual",
+      request.notes ? `manual entry: ${request.notes}` : "manual entry",
+    );
+
+    if (request.idempotencyKey) {
+      this.registerIdempotencyKey(this.manualEntryIdempotency, householdId, request.idempotencyKey);
+    }
+
+    return {
+      householdId,
+      inventory: this.getInventory(householdId),
+      applied: eventsCreated > 0,
+      eventsCreated,
+    };
+  }
+
   async generateDailyRecommendations(
     householdId: string,
     request: GenerateDailyRecommendationsRequest,
@@ -512,9 +622,131 @@ export class InMemoryJobStore implements ReceiptJobStore {
     householdId: string,
     items: ReceiptItem[],
     purchasedAt?: string,
-  ): void {
+    source = "receipt",
+    reasonPrefix = "receipt item",
+  ): number {
     const lots = this.inventoryLots.get(householdId) ?? [];
     const events = this.inventoryEvents.get(householdId) ?? [];
+    const eventsCreated = this.applyInventoryAddsToCollections(
+      householdId,
+      lots,
+      events,
+      items,
+      purchasedAt,
+      source,
+      reasonPrefix,
+    );
+
+    this.inventoryLots.set(householdId, lots);
+    this.inventoryEvents.set(householdId, events);
+    return eventsCreated;
+  }
+
+  private applyInventoryItemDelta(
+    householdId: string,
+    previousItems: ReceiptItem[],
+    nextItems: ReceiptItem[],
+    source: string,
+    purchasedAt?: string,
+    reason?: string,
+  ): number {
+    const previous = aggregateItems(previousItems);
+    const next = aggregateItems(nextItems);
+    const itemKeys = new Set([...previous.keys(), ...next.keys()]);
+    const lots = this.inventoryLots.get(householdId) ?? [];
+    const events = this.inventoryEvents.get(householdId) ?? [];
+    let eventsCreated = 0;
+
+    for (const key of itemKeys) {
+      const prev = previous.get(key);
+      const nxt = next.get(key);
+      const prevQuantity = prev?.quantity ?? 0;
+      const nextQuantity = nxt?.quantity ?? 0;
+      const delta = Number.parseFloat((nextQuantity - prevQuantity).toFixed(3));
+      if (delta === 0) {
+        continue;
+      }
+
+      if (delta > 0) {
+        eventsCreated += this.applyInventoryAddsToCollections(
+          householdId,
+          lots,
+          events,
+          [
+            {
+              ...(nxt?.item ?? prev?.item ?? inferFallbackItemFromKey(key)),
+              quantity: delta,
+            },
+          ],
+          purchasedAt,
+          source,
+          reason ?? "receipt review delta",
+        );
+        continue;
+      }
+
+      const target = nxt?.item ?? prev?.item ?? inferFallbackItemFromKey(key);
+      const now = nowIso();
+      let remainingToReduce = Math.abs(delta);
+      const candidates = lots.filter(
+        (lot) =>
+          lot.itemKey === target.itemKey &&
+          lot.unit === target.unit &&
+          lot.category === target.category,
+      );
+
+      for (const lot of candidates) {
+        if (remainingToReduce <= 0) {
+          break;
+        }
+        if (lot.quantityRemaining <= 0) {
+          continue;
+        }
+
+        const reduced = Number.parseFloat(
+          Math.min(lot.quantityRemaining, remainingToReduce).toFixed(3),
+        );
+        if (reduced <= 0) {
+          continue;
+        }
+
+        lot.quantityRemaining = Number.parseFloat((lot.quantityRemaining - reduced).toFixed(3));
+        lot.updatedAt = now;
+        remainingToReduce = Number.parseFloat((remainingToReduce - reduced).toFixed(3));
+
+        events.push({
+          eventId: `event_${randomUUID()}`,
+          householdId,
+          lotId: lot.lotId,
+          eventType: "adjust",
+          quantity: reduced,
+          unit: target.unit,
+          source,
+          reason: reason ?? `receipt review correction: ${target.rawName}`,
+          createdAt: now,
+        });
+        eventsCreated += 1;
+      }
+    }
+
+    this.inventoryLots.set(
+      householdId,
+      lots.filter((lot) => lot.quantityRemaining > 0),
+    );
+    this.inventoryEvents.set(householdId, events);
+    return eventsCreated;
+  }
+
+  private applyInventoryAddsToCollections(
+    householdId: string,
+    lots: InventoryLot[],
+    events: InventoryEvent[],
+    items: ReceiptItem[],
+    purchasedAt: string | undefined,
+    source: string,
+    reasonPrefix: string,
+  ): number {
+    let eventsCreated = 0;
 
     for (const item of items) {
       const now = nowIso();
@@ -554,15 +786,86 @@ export class InMemoryJobStore implements ReceiptJobStore {
         eventType: "add",
         quantity: item.quantity,
         unit: item.unit,
-        source: "receipt",
-        reason: `receipt item: ${item.rawName}`,
+        source,
+        reason: `${reasonPrefix}: ${item.rawName}`,
         createdAt: now,
       });
+      eventsCreated += 1;
     }
 
-    this.inventoryLots.set(householdId, lots);
-    this.inventoryEvents.set(householdId, events);
+    return eventsCreated;
   }
+
+  private hasIdempotencyKey(store: Map<string, Set<string>>, scope: string, key: string): boolean {
+    return store.get(scope)?.has(key) ?? false;
+  }
+
+  private registerIdempotencyKey(
+    store: Map<string, Set<string>>,
+    scope: string,
+    key: string,
+  ): void {
+    const keys = store.get(scope) ?? new Set<string>();
+    keys.add(key);
+    store.set(scope, keys);
+  }
+}
+
+type AggregatedItem = {
+  item: ReceiptItem;
+  quantity: number;
+};
+
+function aggregateItems(items: ReceiptItem[]): Map<string, AggregatedItem> {
+  const map = new Map<string, AggregatedItem>();
+
+  for (const item of items) {
+    const key = itemAggregateKey(item);
+    const existing = map.get(key);
+    if (!existing) {
+      map.set(key, {
+        item: clone(item),
+        quantity: item.quantity,
+      });
+      continue;
+    }
+
+    existing.quantity = Number.parseFloat((existing.quantity + item.quantity).toFixed(3));
+  }
+
+  return map;
+}
+
+function mergeReceiptItems(items: ReceiptItem[]): ReceiptItem[] {
+  return [...aggregateItems(items).values()].map((entry) => ({
+    ...entry.item,
+    quantity: entry.quantity,
+  }));
+}
+
+function itemAggregateKey(item: ReceiptItem): string {
+  return `${item.itemKey}:${item.unit}:${item.category}`;
+}
+
+function computeQuantityFingerprint(items: ReceiptItem[]): string {
+  return JSON.stringify(
+    [...aggregateItems(items).entries()]
+      .map(([key, value]) => ({ key, quantity: value.quantity }))
+      .toSorted((a, b) => a.key.localeCompare(b.key)),
+  );
+}
+
+function inferFallbackItemFromKey(key: string): ReceiptItem {
+  const [itemKey] = key.split(":");
+  return {
+    itemKey: itemKey || "unknown-item",
+    rawName: itemKey || "unknown-item",
+    normalizedName: itemKey || "unknown-item",
+    quantity: 0,
+    unit: "count",
+    category: "other",
+    confidence: 0.5,
+  };
 }
 
 function defaultSignalValue(signalType: RecommendationFeedbackRequest["signalType"]): number {

@@ -77,6 +77,24 @@ export const ReceiptDetailsResponseSchema = z.object({
   receipt: ReceiptUploadRecordSchema,
 });
 
+export const ReceiptReviewModeSchema = z.enum(["overwrite", "append"]);
+
+export const ReceiptReviewRequestSchema = z.object({
+  householdId: IdSchema,
+  mode: ReceiptReviewModeSchema.default("overwrite"),
+  items: z.array(ReceiptItemSchema).min(1),
+  merchantName: z.string().min(1).max(120).optional(),
+  purchasedAt: z.iso.datetime().optional(),
+  notes: z.string().max(500).optional(),
+  idempotencyKey: z.string().min(1).max(128).optional(),
+});
+
+export const ReceiptReviewResponseSchema = z.object({
+  receipt: ReceiptUploadRecordSchema,
+  applied: z.boolean(),
+  eventsCreated: z.number().int().min(0),
+});
+
 export const ReceiptProcessRequestSchema = z.object({
   householdId: IdSchema,
   ocrText: z.string().min(1).max(20000).optional(),
@@ -163,6 +181,20 @@ export const InventorySnapshotResponseSchema = z.object({
   householdId: IdSchema,
   lots: z.array(InventoryLotSchema),
   events: z.array(InventoryEventSchema),
+});
+
+export const ManualInventoryEntryRequestSchema = z.object({
+  items: z.array(ReceiptItemSchema).min(1),
+  purchasedAt: z.iso.datetime().optional(),
+  notes: z.string().max(500).optional(),
+  idempotencyKey: z.string().min(1).max(128).optional(),
+});
+
+export const ManualInventoryEntryResponseSchema = z.object({
+  householdId: IdSchema,
+  inventory: InventorySnapshotResponseSchema,
+  applied: z.boolean(),
+  eventsCreated: z.number().int().min(0),
 });
 
 export const RecommendationRunTypeSchema = z.enum(["daily", "weekly"]);
@@ -264,6 +296,9 @@ export type ReceiptUploadRequest = z.infer<typeof ReceiptUploadRequestSchema>;
 export type ReceiptUploadResponse = z.infer<typeof ReceiptUploadResponseSchema>;
 export type ReceiptUploadRecord = z.infer<typeof ReceiptUploadRecordSchema>;
 export type ReceiptDetailsResponse = z.infer<typeof ReceiptDetailsResponseSchema>;
+export type ReceiptReviewMode = z.infer<typeof ReceiptReviewModeSchema>;
+export type ReceiptReviewRequest = z.infer<typeof ReceiptReviewRequestSchema>;
+export type ReceiptReviewResponse = z.infer<typeof ReceiptReviewResponseSchema>;
 export type ReceiptProcessRequest = z.infer<typeof ReceiptProcessRequestSchema>;
 export type ReceiptProcessJob = z.infer<typeof ReceiptProcessJobSchema>;
 export type ClaimedJob = z.infer<typeof ClaimedJobSchema>;
@@ -277,6 +312,8 @@ export type FailJobRequest = z.infer<typeof FailJobRequestSchema>;
 export type InventoryLot = z.infer<typeof InventoryLotSchema>;
 export type InventoryEvent = z.infer<typeof InventoryEventSchema>;
 export type InventorySnapshotResponse = z.infer<typeof InventorySnapshotResponseSchema>;
+export type ManualInventoryEntryRequest = z.infer<typeof ManualInventoryEntryRequestSchema>;
+export type ManualInventoryEntryResponse = z.infer<typeof ManualInventoryEntryResponseSchema>;
 export type RecommendationRunType = z.infer<typeof RecommendationRunTypeSchema>;
 export type RecommendationPriority = z.infer<typeof RecommendationPrioritySchema>;
 export type FeedbackSignalType = z.infer<typeof FeedbackSignalTypeSchema>;

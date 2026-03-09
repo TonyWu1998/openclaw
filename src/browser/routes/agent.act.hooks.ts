@@ -48,6 +48,7 @@ export function registerBrowserAgentActHookRoutes(
             inputRef,
             element,
             paths: resolvedPaths,
+            timeoutMs: timeoutMs ?? undefined,
           });
         } else {
           await pw.armFileUploadViaPlaywright({

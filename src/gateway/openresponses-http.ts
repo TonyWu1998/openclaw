@@ -234,6 +234,7 @@ function createAssistantOutputItem(params: {
 }
 
 async function runResponsesAgentCommand(params: {
+  agentId: string;
   message: string;
   images: ImageContent[];
   clientTools: ClientToolDefinition[];
@@ -245,6 +246,7 @@ async function runResponsesAgentCommand(params: {
 }) {
   return agentCommand(
     {
+      agentId: params.agentId,
       message: params.message,
       images: params.images.length > 0 ? params.images : undefined,
       clientTools: params.clientTools.length > 0 ? params.clientTools : undefined,
@@ -452,6 +454,7 @@ export async function handleOpenResponsesHttpRequest(
   if (!stream) {
     try {
       const result = await runResponsesAgentCommand({
+        agentId,
         message: prompt.message,
         images,
         clientTools: resolvedClientTools,
@@ -684,6 +687,7 @@ export async function handleOpenResponsesHttpRequest(
   void (async () => {
     try {
       const result = await runResponsesAgentCommand({
+        agentId,
         message: prompt.message,
         images,
         clientTools: resolvedClientTools,

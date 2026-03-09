@@ -71,6 +71,7 @@ describe("setInputFilesViaPlaywright", () => {
       targetId: "T1",
       inputRef: "e7",
       paths: ["/tmp/openclaw/uploads/ok.txt"],
+      timeoutMs: 4321,
     });
 
     expect(resolveStrictExistingPathsWithinRoot).toHaveBeenCalledWith({
@@ -79,7 +80,9 @@ describe("setInputFilesViaPlaywright", () => {
       scopeLabel: "uploads directory (/tmp/openclaw/uploads)",
     });
     expect(refLocator).toHaveBeenCalledWith(page, "e7");
-    expect(setInputFiles).toHaveBeenCalledWith(["/private/tmp/openclaw/uploads/ok.txt"]);
+    expect(setInputFiles).toHaveBeenCalledWith(["/private/tmp/openclaw/uploads/ok.txt"], {
+      timeout: 4321,
+    });
   });
 
   it("throws and skips setInputFiles when use-time validation fails", async () => {

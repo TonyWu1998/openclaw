@@ -611,6 +611,7 @@ export async function setInputFilesViaPlaywright(opts: {
   inputRef?: string;
   element?: string;
   paths: string[];
+  timeoutMs?: number;
 }): Promise<void> {
   const page = await getPageForTargetId(opts);
   ensurePageState(page);
@@ -639,7 +640,12 @@ export async function setInputFilesViaPlaywright(opts: {
   const resolvedPaths = uploadPathsResult.paths;
 
   try {
-    await locator.setInputFiles(resolvedPaths);
+    await locator.setInputFiles(resolvedPaths, {
+      timeout:
+        typeof opts.timeoutMs === "number" && Number.isFinite(opts.timeoutMs)
+          ? opts.timeoutMs
+          : undefined,
+    });
   } catch (err) {
     throw toAIFriendlyError(err, inputRef || element);
   }

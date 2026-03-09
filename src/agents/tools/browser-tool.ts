@@ -343,51 +343,62 @@ export function createBrowserTool(opts?: {
         : null;
 
       switch (action) {
-        case "status":
+        case "status": {
+          const { timeoutMs } = readOptionalTargetAndTimeout(params);
           if (proxyRequest) {
             return jsonResult(
               await proxyRequest({
                 method: "GET",
                 path: "/",
                 profile,
+                timeoutMs,
               }),
             );
           }
-          return jsonResult(await browserStatus(baseUrl, { profile }));
-        case "start":
+          return jsonResult(await browserStatus(baseUrl, { profile, timeoutMs }));
+        }
+        case "start": {
+          const { timeoutMs } = readOptionalTargetAndTimeout(params);
           if (proxyRequest) {
             await proxyRequest({
               method: "POST",
               path: "/start",
               profile,
+              timeoutMs,
             });
             return jsonResult(
               await proxyRequest({
                 method: "GET",
                 path: "/",
                 profile,
+                timeoutMs,
               }),
             );
           }
-          await browserStart(baseUrl, { profile });
-          return jsonResult(await browserStatus(baseUrl, { profile }));
-        case "stop":
+          await browserStart(baseUrl, { profile, timeoutMs });
+          return jsonResult(await browserStatus(baseUrl, { profile, timeoutMs }));
+        }
+        case "stop": {
+          const { timeoutMs } = readOptionalTargetAndTimeout(params);
           if (proxyRequest) {
             await proxyRequest({
               method: "POST",
               path: "/stop",
               profile,
+              timeoutMs,
             });
             return jsonResult(
               await proxyRequest({
                 method: "GET",
                 path: "/",
                 profile,
+                timeoutMs,
               }),
             );
           }
-          await browserStop(baseUrl, { profile });
-          return jsonResult(await browserStatus(baseUrl, { profile }));
+          await browserStop(baseUrl, { profile, timeoutMs });
+          return jsonResult(await browserStatus(baseUrl, { profile, timeoutMs }));
+        }
         case "profiles":
           if (proxyRequest) {
             const result = await proxyRequest({
@@ -397,74 +408,85 @@ export function createBrowserTool(opts?: {
             return jsonResult(result);
           }
           return jsonResult({ profiles: await browserProfiles(baseUrl) });
-        case "tabs":
+        case "tabs": {
+          const { timeoutMs } = readOptionalTargetAndTimeout(params);
           if (proxyRequest) {
             const result = await proxyRequest({
               method: "GET",
               path: "/tabs",
               profile,
+              timeoutMs,
             });
             const tabs = (result as { tabs?: unknown[] }).tabs ?? [];
             return formatTabsToolResult(tabs);
           }
           {
-            const tabs = await browserTabs(baseUrl, { profile });
+            const tabs = await browserTabs(baseUrl, { profile, timeoutMs });
             return formatTabsToolResult(tabs);
           }
+        }
         case "open": {
           const targetUrl = readTargetUrlParam(params);
+          const { timeoutMs } = readOptionalTargetAndTimeout(params);
           if (proxyRequest) {
             const result = await proxyRequest({
               method: "POST",
               path: "/tabs/open",
               profile,
               body: { url: targetUrl },
+              timeoutMs,
             });
             return jsonResult(result);
           }
-          return jsonResult(await browserOpenTab(baseUrl, targetUrl, { profile }));
+          return jsonResult(await browserOpenTab(baseUrl, targetUrl, { profile, timeoutMs }));
         }
         case "focus": {
           const targetId = readStringParam(params, "targetId", {
             required: true,
           });
+          const { timeoutMs } = readOptionalTargetAndTimeout(params);
           if (proxyRequest) {
             const result = await proxyRequest({
               method: "POST",
               path: "/tabs/focus",
               profile,
               body: { targetId },
+              timeoutMs,
             });
             return jsonResult(result);
           }
-          await browserFocusTab(baseUrl, targetId, { profile });
+          await browserFocusTab(baseUrl, targetId, { profile, timeoutMs });
           return jsonResult({ ok: true });
         }
         case "close": {
           const targetId = readStringParam(params, "targetId");
+          const { timeoutMs } = readOptionalTargetAndTimeout(params);
           if (proxyRequest) {
             const result = targetId
               ? await proxyRequest({
                   method: "DELETE",
                   path: `/tabs/${encodeURIComponent(targetId)}`,
                   profile,
+                  timeoutMs,
                 })
               : await proxyRequest({
                   method: "POST",
                   path: "/act",
                   profile,
                   body: { kind: "close" },
+                  timeoutMs,
                 });
             return jsonResult(result);
           }
           if (targetId) {
-            await browserCloseTab(baseUrl, targetId, { profile });
+            await browserCloseTab(baseUrl, targetId, { profile, timeoutMs });
           } else {
             await browserAct(baseUrl, { kind: "close" }, { profile });
           }
           return jsonResult({ ok: true });
         }
         case "snapshot": {
+          const { timeoutMs } = readOptionalTargetAndTimeout(params);
           const snapshotDefaults = loadConfig().browser?.snapshotDefaults;
           const format =
             params.snapshotFormat === "ai" || params.snapshotFormat === "aria"
@@ -526,6 +548,7 @@ export function createBrowserTool(opts?: {
                   labels,
                   mode,
                 },
+                timeoutMs,
               })) as Awaited<ReturnType<typeof browserSnapshot>>)
             : await browserSnapshot(baseUrl, {
                 format,
@@ -541,6 +564,7 @@ export function createBrowserTool(opts?: {
                 labels,
                 mode,
                 profile,
+                timeoutMs,
               });
           if (snapshot.format === "ai") {
             const extractedText = snapshot.snapshot ?? "";
@@ -607,7 +631,7 @@ export function createBrowserTool(opts?: {
           }
         }
         case "screenshot": {
-          const targetId = readStringParam(params, "targetId");
+          const { targetId, timeoutMs } = readOptionalTargetAndTimeout(params);
           const fullPage = Boolean(params.fullPage);
           const ref = readStringParam(params, "ref");
           const element = readStringParam(params, "element");
@@ -623,7 +647,9 @@ export function createBrowserTool(opts?: {
                   ref,
                   element,
                   type,
+                  timeoutMs,
                 },
+                timeoutMs,
               })) as Awaited<ReturnType<typeof browserScreenshotAction>>)
             : await browserScreenshotAction(baseUrl, {
                 targetId,
@@ -632,6 +658,7 @@ export function createBrowserTool(opts?: {
                 element,
                 type,
                 profile,
+                timeoutMs,
               });
           return await imageResultFromFile({
             label: "browser:screenshot",
@@ -641,7 +668,7 @@ export function createBrowserTool(opts?: {
         }
         case "navigate": {
           const targetUrl = readTargetUrlParam(params);
-          const targetId = readStringParam(params, "targetId");
+          const { targetId, timeoutMs } = readOptionalTargetAndTimeout(params);
           if (proxyRequest) {
             const result = await proxyRequest({
               method: "POST",
@@ -650,7 +677,9 @@ export function createBrowserTool(opts?: {
               body: {
                 url: targetUrl,
                 targetId,
+                timeoutMs,
               },
+              timeoutMs,
             });
             return jsonResult(result);
           }
@@ -659,6 +688,7 @@ export function createBrowserTool(opts?: {
               url: targetUrl,
               targetId,
               profile,
+              timeoutMs,
             }),
           );
         }

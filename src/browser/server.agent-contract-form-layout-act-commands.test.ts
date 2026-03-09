@@ -182,14 +182,32 @@ describe("browser control server", () => {
     const uploadWithInputRef = await postJson(`${base}/hooks/file-chooser`, {
       paths: ["c.txt"],
       inputRef: "e99",
+      timeoutMs: 2345,
     });
     expect(uploadWithInputRef).toMatchObject({ ok: true });
+    expect(pwMocks.setInputFilesViaPlaywright).toHaveBeenCalledWith({
+      cdpUrl: state.cdpBaseUrl,
+      targetId: "abcd1234",
+      inputRef: "e99",
+      element: undefined,
+      paths: [path.resolve(DEFAULT_UPLOAD_DIR, "c.txt")],
+      timeoutMs: 2345,
+    });
 
     const uploadWithElement = await postJson(`${base}/hooks/file-chooser`, {
       paths: ["d.txt"],
       element: "input[type=file]",
+      timeoutMs: 3456,
     });
     expect(uploadWithElement).toMatchObject({ ok: true });
+    expect(pwMocks.setInputFilesViaPlaywright).toHaveBeenCalledWith({
+      cdpUrl: state.cdpBaseUrl,
+      targetId: "abcd1234",
+      inputRef: undefined,
+      element: "input[type=file]",
+      paths: [path.resolve(DEFAULT_UPLOAD_DIR, "d.txt")],
+      timeoutMs: 3456,
+    });
 
     const dialog = await postJson(`${base}/hooks/dialog`, {
       accept: true,
